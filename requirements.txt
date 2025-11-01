@@ -1,6 +1,14 @@
 fastapi
 uvicorn
-httpx
+gunicorn
+requests
 beautifulsoup4
-playwright
 pydantic
+python-dotenv
+httpx
+lxml
+selenium
+webdriver-manager
+playwright
+bs4
+aiohttp
