@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: hg-abogados-ia
+    env: python
+    buildCommand: |
+      pip install -r requirements.txt
+      playwright install --with-deps
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: FIELWEB_USERNAME
+        value: consultor@hygabogados.ec
+      - key: FIELWEB_PASSWORD
+        value: consultor@hygabogados.ec
+      - key: FIELWEB_LOGIN_URL
+        value: https://www.fielweb.com/Cuenta/Login.aspx
+      - key: X_API_KEY
+        value: HYGABOGADOS-SECURE-2025
