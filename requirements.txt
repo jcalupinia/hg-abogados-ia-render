@@ -1,14 +1,50 @@
-fastapi
-uvicorn
-gunicorn
-requests
-beautifulsoup4
-pydantic
-python-dotenv
-httpx
-lxml
-selenium
-webdriver-manager
-playwright
-bs4
-aiohttp
+# ==========================
+# 🔧 CORE FRAMEWORK
+# ==========================
+fastapi==0.115.0
+uvicorn==0.30.1
+gunicorn==23.0.0
+
+# ==========================
+# 🌐 HTTP / API UTILITIES
+# ==========================
+requests==2.32.3
+aiohttp==3.9.5
+httpx==0.27.0
+
+# ==========================
+# 🧠 AUTOMATIZACIÓN Y NAVEGACIÓN
+# ==========================
+playwright==1.46.0
+beautifulsoup4==4.12.3
+lxml==5.2.2
+html5lib==1.1
+
+# ==========================
+# 🧰 UTILIDADES DEL SISTEMA
+# ==========================
+python-dotenv==1.0.1
+pydantic==2.9.2
+asyncio==3.4.3
+tqdm==4.66.5
+
+# ==========================
+# 🧪 DEBUG / LOGGING
+# ==========================
+colorama==0.4.6
+loguru==0.7.2
+
+# ==========================
+# 🧮 ANALÍTICA / TEXTOS
+# ==========================
+regex==2024.9.11
+nltk==3.9.1
+
+# ==========================
+# 🧱 COMPATIBILIDAD Y ENTORNO CLOUD
+# ==========================
+certifi>=2024.6.2
+charset-normalizer>=3.3.2
+idna>=3.6
+urllib3>=2.2.2
+typing-extensions>=4.12.2
