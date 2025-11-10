@@ -5,16 +5,20 @@ services:
     region: oregon
     plan: professional
     buildCommand: |
-      echo "🚀 Configurando entorno de H&G Abogados IA con Python 3.10..."
-      pip install --upgrade pip setuptools wheel
-      echo "📦 Instalando dependencias del proyecto..."
-      pip install -r requirements.txt
-      echo "🧠 Instalando Playwright (Chromium)..."
-      playwright install --with-deps chromium
+      echo "🚀 Configurando entorno controlado de H&G Abogados IA"
+      echo "📦 Instalando dependencias del sistema base..."
+      apt-get update && apt-get install -y python3.10 python3.10-dev python3.10-venv python3-pip g++ make
+      ln -sf /usr/bin/python3.10 /usr/bin/python
+      ln -sf /usr/bin/pip3 /usr/bin/pip
       python --version
-      pip list | grep fastapi
-      echo "✅ Entorno instalado correctamente."
+      pip install --upgrade pip setuptools wheel
+      echo "📜 Instalando librerías del proyecto..."
+      pip install -r requirements.txt
+      echo "🧠 Instalando Playwright con Chromium..."
+      playwright install --with-deps chromium
+      echo "✅ Configuración del entorno completada exitosamente."
     startCommand: gunicorn -k uvicorn.workers.UvicornWorker main:app
+    autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.12
