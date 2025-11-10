@@ -3,54 +3,26 @@ services:
     name: hg-abogados-ia
     env: python
     region: oregon
-    plan: free
-    autoDeploy: true
-
+    plan: professional
     buildCommand: |
-      echo "🚀 Iniciando instalación del entorno H&G Abogados IA..."
-      pip install --upgrade pip
+      echo "🚀 Configurando entorno de H&G Abogados IA con Python 3.10..."
+      pip install --upgrade pip setuptools wheel
+      echo "📦 Instalando dependencias del proyecto..."
       pip install -r requirements.txt
-      # Instalación de Playwright y dependencias del navegador
-      playwright install --with-deps
-      echo "✅ Entorno completado correctamente."
-
-    startCommand: gunicorn -k uvicorn.workers.UvicornWorker main:app --timeout 120 --log-level info
-
-    healthCheckPath: /health
-
+      echo "🧠 Instalando Playwright (Chromium)..."
+      playwright install --with-deps chromium
+      python --version
+      pip list | grep fastapi
+      echo "✅ Entorno instalado correctamente."
+    startCommand: gunicorn -k uvicorn.workers.UvicornWorker main:app
     envVars:
-      # -------------------------------
-      # 🔐 Variables de seguridad
-      # -------------------------------
-      - key: X_API_KEY
-        value: HYGABOGADOS-SECURE-2025
-
-      # -------------------------------
-      # ⚙️ Configuración FielWeb
-      # -------------------------------
+      - key: PYTHON_VERSION
+        value: 3.10.12
       - key: FIELWEB_USERNAME
         value: consultor@hygabogados.ec
       - key: FIELWEB_PASSWORD
         value: consultor@hygabogados.ec
       - key: FIELWEB_LOGIN_URL
         value: https://www.fielweb.com/Cuenta/Login.aspx
-
-      # -------------------------------
-      # 🧠 Configuración técnica
-      # -------------------------------
-      - key: PYTHON_VERSION
-        value: 3.10.12
-      - key: PLAYWRIGHT_BROWSERS_PATH
-        value: /usr/local/share/playwright
-      - key: NODE_OPTIONS
-        value: --max-old-space-size=4096
-      - key: LOG_LEVEL
-        value: info
-
-    # -------------------------------
-    # 🔍 Política de reinicios automáticos
-    # -------------------------------
-    autoDeploy: true
-    retries: 3
-    maxRetries: 5
-    timeout: 600
+      - key: X_API_KEY
+        value: HYGABOGADOS-SECURE-2025
