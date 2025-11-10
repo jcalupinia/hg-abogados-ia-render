@@ -1,47 +1,50 @@
 # ==========================
-# 🔧 CORE FRAMEWORK
+# 🔧 FRAMEWORK PRINCIPAL
 # ==========================
 fastapi==0.115.0
 uvicorn==0.30.1
 gunicorn==23.0.0
 
 # ==========================
-# 🌐 HTTP / API UTILITIES
+# 🌐 CLIENTES HTTP / API
 # ==========================
 requests==2.32.3
+aiohttp==3.9.5
 httpx==0.27.0
-aiohttp==3.9.3
 
 # ==========================
-# 🧠 AUTOMATIZACIÓN Y NAVEGACIÓN
+# 🧠 AUTOMATIZACIÓN WEB
 # ==========================
 playwright==1.46.0
 beautifulsoup4==4.12.3
 html5lib==1.1
 
-# ⚠️ Se eliminó lxml (causa errores al compilar en entornos sin gcc)
-# Si luego Render te da más capacidad, puedes volver a agregarlo
-
 # ==========================
-# 🧰 UTILIDADES DEL SISTEMA
+# ⚙️ UTILIDADES
 # ==========================
 python-dotenv==1.0.1
-pydantic==2.8.2
+pydantic==2.9.2
 tqdm==4.66.5
 colorama==0.4.6
 loguru==0.7.2
 
 # ==========================
-# 🧮 ANALÍTICA / TEXTO
+# 🧮 TEXTO Y EXPRESIONES
 # ==========================
 regex==2024.9.11
 nltk==3.9.1
 
 # ==========================
-# ⚙️ COMPATIBILIDAD Y CERTIFICADOS
+# ⚙️ COMPATIBILIDAD Y SSL
 # ==========================
 certifi>=2024.6.2
 charset-normalizer>=3.3.2
 idna>=3.6
 urllib3>=2.2.2
 typing-extensions>=4.12.2
+
+# ==========================
+# 💡 FIX DE greenlet
+# ==========================
+greenlet==3.0.3 --only-binary=:all:
+gevent==24.2.1 --only-binary=:all:
