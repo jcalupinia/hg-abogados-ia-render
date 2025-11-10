@@ -4,18 +4,53 @@ services:
     env: python
     region: oregon
     plan: free
+    autoDeploy: true
+
     buildCommand: |
+      echo "🚀 Iniciando instalación del entorno H&G Abogados IA..."
       pip install --upgrade pip
       pip install -r requirements.txt
+      # Instalación de Playwright y dependencias del navegador
       playwright install --with-deps
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-    autoDeploy: true
+      echo "✅ Entorno completado correctamente."
+
+    startCommand: gunicorn -k uvicorn.workers.UvicornWorker main:app --timeout 120 --log-level info
+
+    healthCheckPath: /health
+
     envVars:
+      # -------------------------------
+      # 🔐 Variables de seguridad
+      # -------------------------------
+      - key: X_API_KEY
+        value: HYGABOGADOS-SECURE-2025
+
+      # -------------------------------
+      # ⚙️ Configuración FielWeb
+      # -------------------------------
       - key: FIELWEB_USERNAME
         value: consultor@hygabogados.ec
       - key: FIELWEB_PASSWORD
         value: consultor@hygabogados.ec
       - key: FIELWEB_LOGIN_URL
         value: https://www.fielweb.com/Cuenta/Login.aspx
-      - key: X_API_KEY
-        value: HYGABOGADOS-SECURE-2025
+
+      # -------------------------------
+      # 🧠 Configuración técnica
+      # -------------------------------
+      - key: PYTHON_VERSION
+        value: 3.10.12
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /usr/local/share/playwright
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=4096
+      - key: LOG_LEVEL
+        value: info
+
+    # -------------------------------
+    # 🔍 Política de reinicios automáticos
+    # -------------------------------
+    autoDeploy: true
+    retries: 3
+    maxRetries: 5
+    timeout: 600
