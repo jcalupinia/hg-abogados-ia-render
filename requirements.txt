@@ -1,50 +1,23 @@
-# ==========================
-# 🔧 FRAMEWORK PRINCIPAL
-# ==========================
 fastapi==0.115.0
 uvicorn==0.30.1
 gunicorn==23.0.0
-
-# ==========================
-# 🌐 CLIENTES HTTP / API
-# ==========================
 requests==2.32.3
-aiohttp==3.9.5
-httpx==0.27.0
-
-# ==========================
-# 🧠 AUTOMATIZACIÓN WEB
-# ==========================
+aiohttp==3.8.5
+httpx==0.25.2
 playwright==1.46.0
 beautifulsoup4==4.12.3
 html5lib==1.1
-
-# ==========================
-# ⚙️ UTILIDADES
-# ==========================
 python-dotenv==1.0.1
 pydantic==2.9.2
 tqdm==4.66.5
 colorama==0.4.6
 loguru==0.7.2
-
-# ==========================
-# 🧮 TEXTO Y EXPRESIONES
-# ==========================
 regex==2024.9.11
 nltk==3.9.1
-
-# ==========================
-# ⚙️ COMPATIBILIDAD Y SSL
-# ==========================
 certifi>=2024.6.2
 charset-normalizer>=3.3.2
 idna>=3.6
 urllib3>=2.2.2
 typing-extensions>=4.12.2
-
-# ==========================
-# 💡 FIX DE greenlet
-# ==========================
-greenlet==3.0.3 --only-binary=:all:
-gevent==24.2.1 --only-binary=:all:
+greenlet==3.0.3
+gevent==24.2.1
