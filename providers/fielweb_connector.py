@@ -2,83 +2,92 @@ import os
 import asyncio
 from playwright.async_api import async_playwright
 
-# Función principal del conector FielWeb
-async def _consultar_fielweb_async(payload: dict):
-    """
-    Automatiza la búsqueda en FielWeb:
-    1️⃣ Inicia sesión.
-    2️⃣ Busca el texto indicado.
-    3️⃣ Extrae los enlaces de descarga disponibles (PDF, Word, Concordancias, Jurisprudencia).
-    4️⃣ Devuelve los resultados en formato JSON.
-    """
-    username = os.getenv("FIELWEB_USERNAME")
-    password = os.getenv("FIELWEB_PASSWORD")
-    login_url = os.getenv("FIELWEB_LOGIN_URL", "https://www.fielweb.com/Cuenta/Login.aspx")
+# ================================
+# ⚙️ CONFIGURACIÓN
+# ================================
+FIELWEB_URL = os.getenv("FIELWEB_LOGIN_URL", "https://www.fielweb.com/Cuenta/Login.aspx")
+USERNAME = os.getenv("FIELWEB_USERNAME")
+PASSWORD = os.getenv("FIELWEB_PASSWORD")
 
-    consulta = payload.get("texto", "").strip()
-    if not consulta:
-        return {"estado": "error", "mensaje": "Debe indicar un texto de búsqueda."}
-
+# ================================
+# 🔍 FUNCIÓN PRINCIPAL DE CONSULTA
+# ================================
+async def buscar_en_fielweb(texto):
+    """
+    Inicia sesión en FielWeb, busca el texto indicado y devuelve los resultados,
+    incluyendo enlaces a documentos PDF, Word, concordancias y jurisprudencia relacionada.
+    """
     resultados = []
 
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context()
-            page = await context.new_page()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context()
+        page = await context.new_page()
 
-            # 1️⃣ Ir a la página de login
-            await page.goto(login_url, timeout=60000)
-            await page.fill('input[name="ctl00$ContentPlaceHolder1$txtUsuario"]', username)
-            await page.fill('input[name="ctl00$ContentPlaceHolder1$txtClave"]', password)
-            await page.click('input[id="ctl00_ContentPlaceHolder1_btnIngresar"]')
-            await page.wait_for_load_state("networkidle")
+        # ---- 1️⃣ LOGIN ----
+        await page.goto(FIELWEB_URL)
+        await page.fill('input[name="ctl00$ContentPlaceHolder1$txtUsuario"]', USERNAME)
+        await page.fill('input[name="ctl00$ContentPlaceHolder1$txtClave"]', PASSWORD)
+        await page.click('input[id="ctl00_ContentPlaceHolder1_btnIngresar"]')
+        await page.wait_for_load_state("networkidle")
 
-            print("✅ Sesión iniciada en FielWeb")
+        # ---- 2️⃣ BÚSQUEDA ----
+        await page.fill('input[id="ctl00_ContentPlaceHolder1_txtBuscar"]', texto)
+        await page.click('input[id="ctl00_ContentPlaceHolder1_btnBuscar"]')
+        await page.wait_for_load_state("networkidle")
 
-            # 2️⃣ Ir al módulo de búsqueda
-            await page.goto("https://www.fielweb.com/ConsultaGeneral.aspx", timeout=60000)
-            await page.fill('input[id="ctl00_ContentPlaceHolder1_txtBuscar"]', consulta)
-            await page.click('input[id="ctl00_ContentPlaceHolder1_btnBuscar"]')
-            await page.wait_for_load_state("networkidle")
-
-            # 3️⃣ Extraer resultados
-            links = await page.query_selector_all("a[href]")
+        # ---- 3️⃣ EXTRACCIÓN DE RESULTADOS ----
+        filas = await page.query_selector_all(".resultadoItem, .card-body")
+        for fila in filas:
+            titulo = await fila.inner_text() if fila else "Sin título"
+            links = await fila.query_selector_all("a")
+            enlaces = []
             for link in links:
                 href = await link.get_attribute("href")
-                texto = (await link.inner_text()).strip()
+                texto_link = await link.inner_text()
+                if href and ("pdf" in href or "word" in href or "docx" in href):
+                    enlaces.append({"tipo": "descarga", "texto": texto_link, "url": href})
+                elif "Concordancia" in texto_link:
+                    enlaces.append({"tipo": "concordancia", "texto": texto_link, "url": href})
+                elif "Jurisprudencia" in texto_link or "Sentencia" in texto_link:
+                    enlaces.append({"tipo": "jurisprudencia", "texto": texto_link, "url": href})
+            resultados.append({
+                "titulo": titulo.strip(),
+                "enlaces": enlaces
+            })
 
-                if not href:
-                    continue
+        await browser.close()
+        return resultados
 
-                # Detectar enlaces de descarga y concordancias
-                if any(word in href.lower() for word in ["pdf", "doc", "descargar", "concordancia", "jurisprudencia"]):
-                    resultado = {
-                        "titulo": texto or "Documento legal",
-                        "url": f"https://www.fielweb.com/{href}" if href.startswith("Archivos") else href
-                    }
-                    resultados.append(resultado)
-                    print(f"📄 Enlace detectado: {resultado['titulo']} -> {resultado['url']}")
+# ================================
+# 🧠 INTERFAZ PÚBLICA USADA POR EL GPT
+# ================================
+def consultar_fielweb(payload: dict):
+    """
+    Interfaz sincronizada para FastAPI: recibe el payload, ejecuta la búsqueda
+    y devuelve los resultados estructurados.
+    """
+    texto = payload.get("texto", "").strip()
+    if not texto:
+        return {"error": "Debe proporcionar un texto de búsqueda."}
 
-            await browser.close()
-
-            if not resultados:
-                return {
-                    "estado": "sin_resultados",
-                    "mensaje": f"No se encontraron enlaces de descarga para: {consulta}"
-                }
-
+    try:
+        resultados = asyncio.run(buscar_en_fielweb(texto))
+        if not resultados:
             return {
-                "estado": "éxito",
-                "mensaje": f"Se encontraron {len(resultados)} resultados en FielWeb.",
-                "busqueda": consulta,
-                "resultados": resultados
+                "mensaje": f"No se encontraron resultados para '{texto}'.",
+                "nivel_consulta": "FielWeb",
+                "resultado": []
             }
 
-    except Exception as e:
-        print(f"❌ Error en FielWeb: {str(e)}")
-        return {"estado": "error", "detalle": str(e)}
+        return {
+            "mensaje": f"Resultados encontrados en FielWeb para '{texto}'.",
+            "nivel_consulta": "FielWeb",
+            "resultado": resultados
+        }
 
-# Función síncrona compatible con FastAPI
-def consultar_fielweb(payload: dict):
-    return asyncio.run(_consultar_fielweb_async(payload))
+    except Exception as e:
+        return {
+            "error": f"Ocurrió un error al consultar FielWeb: {str(e)}",
+            "nivel_consulta": "FielWeb"
+        }
