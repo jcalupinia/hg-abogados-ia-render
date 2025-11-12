@@ -1,20 +1,24 @@
-# ---- CORE FRAMEWORK ----
-fastapi==0.115.0
-uvicorn==0.30.6
-gunicorn==21.2.0
+FROM python:3.11-slim
 
-# ---- AUTOMATION & BROWSER ----
-playwright==1.47.0
-beautifulsoup4==4.12.3
-lxml==5.3.0
-requests==2.32.3
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/playwright-browsers
 
-# ---- ASYNC & SERVER UTILITIES ----
-aiohttp==3.9.3
-python-multipart==0.0.9
-pydantic==2.9.2
-typing-extensions==4.12.2
+RUN apt-get update && apt-get install -y \
+    wget curl gnupg \
+    libnss3 libatk1.0-0 libatk-bridge2.0-0 \
+    libx11-6 libxcomposite1 libxdamage1 libxfixes3 \
+    libpangocairo-1.0-0 libpango-1.0-0 libcairo2 \
+    libxrandr2 libxkbcommon0 libasound2 libatspi2.0-0 \
+    libxshmfence1 libgbm1 fonts-liberation \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# ---- EXTRA TOOLS (LOGGING / SYSTEM / DEBUGGING) ----
-tenacity==8.4.2
-tqdm==4.66.5
+WORKDIR /app
+COPY . /app
+
+RUN pip install --no-cache-dir -r requirements.txt
+RUN playwright install chromium
+
+EXPOSE 10000
+
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000}"]
