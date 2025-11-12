@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libnss3 libxss1 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
     libdrm2 libxkbcommon0 libxcomposite1 libxrandr2 libxdamage1 \
     libpango-1.0-0 libcairo2 libasound2 xvfb \
-    gcc python3-dev libxml2-dev libxslt1-dev \
+    gcc python3-dev libxml2-dev libxslt1-dev ca-certificates \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # --------------------------------------------------------
@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # --------------------------------------------------------
 RUN pip install --upgrade pip setuptools wheel && \
     pip install --no-cache-dir playwright==1.47.0 && \
-    python -m playwright install chromium && \
+    playwright install --with-deps chromium && \
     chmod -R 777 /root/.cache/ms-playwright
 
 # --------------------------------------------------------
@@ -47,6 +47,12 @@ COPY . .
 # --------------------------------------------------------
 ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
 ENV PYPPETEER_HOME=/root/.cache/ms-playwright
+
+# --------------------------------------------------------
+# 🔒 Permisos de usuario para Render
+# --------------------------------------------------------
+RUN adduser --disabled-password appuser && chown -R appuser /app
+USER appuser
 
 # --------------------------------------------------------
 # 🚀 Exponer puerto y comando de inicio
