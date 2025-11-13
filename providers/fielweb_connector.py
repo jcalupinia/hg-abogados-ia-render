@@ -5,8 +5,13 @@ from urllib.parse import urljoin
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 import nest_asyncio
 
-# Permitir ejecución anidada dentro del loop de FastAPI/Uvicorn
-nest_asyncio.apply()
+# ================================
+# 🧩 Permitir ejecución anidada en entornos Uvicorn / FastAPI
+# ================================
+try:
+    nest_asyncio.apply()
+except Exception as e:
+    print(f"⚠️ Advertencia: No fue posible aplicar nest_asyncio: {e}")
 
 # ================================
 # ⚙️ CONFIGURACIÓN DESDE ENTORNO
@@ -191,7 +196,10 @@ def consultar_fielweb(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         loop = asyncio.get_event_loop()
-        return loop.run_until_complete(_buscar_en_fielweb_async(texto))
+        if loop.is_running():
+            return asyncio.ensure_future(_buscar_en_fielweb_async(texto))
+        else:
+            return loop.run_until_complete(_buscar_en_fielweb_async(texto))
     except PWTimeout as te:
         return {"error": f"Tiempo de espera agotado en FielWeb: {str(te)}", "nivel_consulta": "FielWeb"}
     except Exception as e:
