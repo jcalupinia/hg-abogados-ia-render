@@ -13,9 +13,11 @@ import nest_asyncio
 # ⚙️ Compatibilidad con entorno Render (modo sandbox)
 # ============================================
 try:
-    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    import nest_asyncio
     nest_asyncio.apply()
-    print("✅ Modo Render seguro activado (uvloop + nest_asyncio)")
+    import uvloop
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    print("✅ Modo Render seguro activado (nest_asyncio + uvloop)")
 except Exception as e:
     print(f"⚠️ No se aplicó uvloop/nest_asyncio: {e}")
 
@@ -126,26 +128,65 @@ async def consult_hybrid(payload: dict):
 # ============================================
 @app.get("/check_fielweb_status")
 async def check_fielweb_status():
+    """
+    🔍 Verifica la configuración completa del entorno FielWeb y Render.
+    Muestra estado de Playwright, variables de entorno, loop y autenticación.
+    """
+    import sys
+    import platform
+    from providers import check_providers_status
+
+    # --- Comprobación básica del entorno ---
+    loop_type = str(type(asyncio.get_running_loop()))
+    render_mode = "Render (uvloop seguro)" if "uvloop" in loop_type else "Local / VSCode"
+
+    # --- Estado de los conectores ---
+    try:
+        provider_status = check_providers_status()
+    except Exception as e:
+        provider_status = {"error": f"No se pudo obtener estado de providers: {str(e)}"}
+
+    # --- Verificar instalación de Playwright ---
     try:
         import playwright
         playwright_status = "✅ Instalado correctamente"
     except Exception as e:
-        playwright_status = f"❌ Error Playwright: {str(e)}"
+        playwright_status = f"❌ No disponible ({str(e)})"
 
+    # --- Verificar credenciales FielWeb ---
     user = os.getenv("FIELWEB_USERNAME")
     pwd = os.getenv("FIELWEB_PASSWORD")
     url = os.getenv("FIELWEB_LOGIN_URL")
-
     credenciales_ok = all([user, pwd, url])
-    cred_status = "✅ Configuradas" if credenciales_ok else "❌ Faltan variables de entorno"
+    credenciales_estado = "✅ Configuradas" if credenciales_ok else "⚠️ Incompletas"
 
+    # --- Test rápido de acceso a la URL de FielWeb ---
+    import requests
+    try:
+        resp = requests.get(url, timeout=8)
+        if resp.status_code == 200:
+            conexion_estado = "✅ Acceso correcto a FielWeb"
+        elif resp.status_code == 403:
+            conexion_estado = "⚠️ Bloqueo 403 (IP o sesión restringida)"
+        else:
+            conexion_estado = f"⚠️ Respuesta inesperada HTTP {resp.status_code}"
+    except Exception as e:
+        conexion_estado = f"❌ Error de conexión: {str(e)}"
+
+    # --- Resumen de entorno ---
     return {
         "estado": "verificación completada",
+        "entorno": render_mode,
+        "python_version": sys.version.split()[0],
+        "so": platform.system(),
         "playwright": playwright_status,
-        "credenciales": cred_status,
+        "credenciales": credenciales_estado,
         "usuario_detectado": user,
         "url_login": url,
-        "api_key_configurada": "✅" if API_KEY else "❌ No definida"
+        "conexion_fielweb": conexion_estado,
+        "providers": provider_status,
+        "api_key_configurada": "✅" if os.getenv("X_API_KEY") else "❌ No definida",
+        "debug_mode": os.getenv("DEBUG", "false"),
     }
 
 # ============================================
