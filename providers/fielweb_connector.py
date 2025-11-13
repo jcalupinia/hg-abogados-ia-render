@@ -5,19 +5,37 @@ from urllib.parse import urljoin
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
 # ================================
-# 🧩 Compatibilidad segura con Render / Uvicorn (uvloop)
+# ⚙️ CONFIGURACIÓN GLOBAL Y DEBUG
 # ================================
-try:
-    import nest_asyncio
-    loop = asyncio.get_event_loop()
-    # Si Render usa uvloop, no aplicar el parche
-    if "uvloop" not in str(type(loop)).lower():
-        nest_asyncio.apply()
-        print("✅ nest_asyncio aplicado (loop estándar detectado)")
-    else:
-        print("⚙️ uvloop detectado, nest_asyncio no se aplica (modo Render seguro)")
-except Exception as e:
-    print(f"⚠️ Advertencia: no se aplicó nest_asyncio ({e})")
+DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+
+def debug_log(message: str):
+    """Imprime logs solo si el modo DEBUG está activo."""
+    if DEBUG:
+        print(f"[DEBUG] {message}")
+
+# ================================
+# 🧩 Compatibilidad segura con Render / Uvicorn
+# ================================
+def aplicar_nest_asyncio_si_es_necesario():
+    """
+    Aplica nest_asyncio solo si el entorno no usa uvloop (Render).
+    Evita el error: "Can't patch loop of type <class 'uvloop.Loop'>"
+    """
+    try:
+        import nest_asyncio
+        loop = asyncio.get_event_loop()
+        if "uvloop" not in str(type(loop)).lower():
+            nest_asyncio.apply()
+            debug_log("nest_asyncio aplicado (loop estándar detectado)")
+        else:
+            debug_log("uvloop detectado, nest_asyncio no se aplica (modo Render seguro)")
+    except Exception as e:
+        print(f"⚠️ Advertencia: no se aplicó nest_asyncio ({e})")
+
+# Ejecutar compatibilidad
+aplicar_nest_asyncio_si_es_necesario()
+
 # ================================
 # ⚙️ CONFIGURACIÓN DESDE ENTORNO
 # ================================
@@ -28,6 +46,8 @@ PASSWORD = os.getenv("FIELWEB_PASSWORD", "").strip()
 PAGE_TIMEOUT_MS = 30_000
 NAV_TIMEOUT_MS = 35_000
 MAX_ITEMS = 12
+
+debug_log(f"Configuración inicial: URL={FIELWEB_URL}, Usuario={USERNAME}")
 
 # ================================
 # 🔧 SELECTORES ADAPTATIVOS
@@ -62,7 +82,6 @@ SEARCH_SELECTORS = {
 }
 
 RESULT_ITEM_SELECTORS = [".resultadoItem", ".card-body", "div.resultado", "div.search-result"]
-
 TITLE_CANDIDATES = ["h3", "h2", "h4", "a.title", "a strong", ".titulo", ".title", "a"]
 DOWNLOAD_ANCHOR_FILTERS = ["pdf", "word", "docx"]
 LABEL_CONCORDANCIAS = ["Concordancia", "Concordancias"]
@@ -75,6 +94,7 @@ async def _first_selector(page, selectors: List[str]) -> Optional[str]:
     for sel in selectors:
         el = await page.query_selector(sel)
         if el:
+            debug_log(f"Selector encontrado: {sel}")
             return sel
     return None
 
@@ -108,6 +128,7 @@ def _classify_link_text(texto: str) -> str:
 # 🔐 LOGIN UNIVERSAL
 # ================================
 async def _login(page, base_url: str, user: str, password: str) -> None:
+    debug_log(f"Iniciando sesión en FielWeb: {base_url}")
     await page.goto(base_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
 
     user_sel = await _first_selector(page, LOGIN_SELECTORS["user"])
@@ -120,16 +141,19 @@ async def _login(page, base_url: str, user: str, password: str) -> None:
     await page.fill(user_sel, user)
     await page.fill(pass_sel, password)
     await page.click(subm_sel)
+    debug_log("Formulario enviado, esperando carga de FielWeb...")
 
     try:
         await page.wait_for_load_state("networkidle", timeout=NAV_TIMEOUT_MS)
     except PWTimeout:
         await page.wait_for_timeout(2000)
+    debug_log("Inicio de sesión completado o timeout leve controlado.")
 
 # ================================
 # 🔎 BÚSQUEDA Y EXTRACCIÓN
 # ================================
 async def _buscar(page, texto: str) -> List[Dict[str, Any]]:
+    debug_log(f"Ejecutando búsqueda de: {texto}")
     q_sel = await _first_selector(page, SEARCH_SELECTORS["query"])
     b_sel = await _first_selector(page, SEARCH_SELECTORS["submit"])
     if not (q_sel and b_sel):
@@ -137,6 +161,7 @@ async def _buscar(page, texto: str) -> List[Dict[str, Any]]:
 
     await page.fill(q_sel, texto)
     await page.click(b_sel)
+    debug_log("Formulario de búsqueda enviado, esperando resultados...")
 
     try:
         await page.wait_for_load_state("networkidle", timeout=NAV_TIMEOUT_MS)
@@ -147,6 +172,7 @@ async def _buscar(page, texto: str) -> List[Dict[str, Any]]:
     for sel in RESULT_ITEM_SELECTORS:
         containers = await page.query_selector_all(sel)
         if containers:
+            debug_log(f"Encontrados {len(containers)} contenedores de resultados.")
             for node in containers[:MAX_ITEMS]:
                 titulo = await _inner_text_or(page, node, TITLE_CANDIDATES, default="Resultado sin título")
                 enlaces = []
@@ -172,6 +198,7 @@ async def _buscar_en_fielweb_async(texto: str) -> Dict[str, Any]:
         raise RuntimeError("Faltan variables de entorno: FIELWEB_LOGIN_URL, FIELWEB_USERNAME o FIELWEB_PASSWORD")
 
     launch_args = ["--no-sandbox", "--disable-dev-shm-usage"]
+    debug_log("Lanzando navegador Chromium en modo headless...")
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=launch_args)
         context = await browser.new_context()
@@ -182,6 +209,7 @@ async def _buscar_en_fielweb_async(texto: str) -> Dict[str, Any]:
             await _login(page, FIELWEB_URL, USERNAME, PASSWORD)
             await page.wait_for_timeout(3000)
             resultados = await _buscar(page, texto)
+            debug_log(f"Se encontraron {len(resultados)} resultados.")
             return {
                 "mensaje": f"Resultados encontrados en FielWeb para '{texto}'.",
                 "nivel_consulta": "FielWeb",
@@ -190,6 +218,7 @@ async def _buscar_en_fielweb_async(texto: str) -> Dict[str, Any]:
         finally:
             await context.close()
             await browser.close()
+            debug_log("Navegador cerrado correctamente.")
 
 # ================================
 # 🧠 INTERFAZ PÚBLICA PARA FASTAPI
@@ -202,8 +231,10 @@ def consultar_fielweb(payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            return asyncio.ensure_future(_buscar_en_fielweb_async(texto))
+            debug_log("Usando loop asíncrono existente (Render).")
+            return asyncio.run_coroutine_threadsafe(_buscar_en_fielweb_async(texto), loop).result()
         else:
+            debug_log("Ejecutando nueva instancia del loop (local).")
             return loop.run_until_complete(_buscar_en_fielweb_async(texto))
     except PWTimeout as te:
         return {"error": f"Tiempo de espera agotado en FielWeb: {str(te)}", "nivel_consulta": "FielWeb"}
