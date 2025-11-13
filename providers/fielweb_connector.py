@@ -1,46 +1,41 @@
-# providers/fielweb_connector.py
 import os
 import asyncio
 from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-# ================================
-# ⚙️ CONFIGURACIÓN DESDE ENTORNO
-# ================================
+# =====================================================
+# ⚙️ CONFIGURACIÓN GENERAL DESDE VARIABLES DE ENTORNO
+# =====================================================
 FIELWEB_URL = os.getenv("FIELWEB_LOGIN_URL", "https://www.fielweb.com/Cuenta/Login.aspx").strip()
-USERNAME = os.getenv("FIELWEB_USERNAME", "consultor@hygabogados.ec").strip()
+USERNAME = os.getenv("FIELWEB_USERNAME", "").strip()
 PASSWORD = os.getenv("FIELWEB_PASSWORD", "").strip()
 
 PAGE_TIMEOUT_MS = 30_000
 NAV_TIMEOUT_MS = 35_000
 MAX_ITEMS = 12
 
-# ================================
+# =====================================================
 # 🔧 SELECTORES ADAPTATIVOS
-# ================================
+# =====================================================
 LOGIN_SELECTORS = {
     "user": [
-        '#usuario',  # Nuevo FielWeb Plus
-        'input[name="usuario"]',
+        '#usuario', 'input[name="usuario"]',
         'input[placeholder*="Usuario"]',
         'input[id*="txtUsuario"]',
         'input[name="ctl00$ContentPlaceHolder1$txtUsuario"]'
     ],
     "password": [
-        '#clave',  # Nuevo FielWeb Plus
-        'input[name="clave"]',
+        '#clave', 'input[name="clave"]',
         'input[placeholder*="Clave"]',
         'input[id*="txtClave"]',
         'input[name="ctl00$ContentPlaceHolder1$txtClave"]',
         'input[type="password"]'
     ],
     "submit": [
-        '#btnEntrar',  # Nuevo FielWeb Plus
-        'button:has-text("Entrar")',
+        '#btnEntrar', 'button:has-text("Entrar")',
         'input[value="Entrar"]',
-        'button[type="submit"]',
-        'input[type="submit"]',
+        'button[type="submit"]', 'input[type="submit"]',
         '#ctl00_ContentPlaceHolder1_btnIngresar'
     ]
 }
@@ -74,17 +69,20 @@ DOWNLOAD_ANCHOR_FILTERS = ["pdf", "word", "docx"]
 LABEL_CONCORDANCIAS = ["Concordancia", "Concordancias"]
 LABEL_JURIS = ["Jurisprudencia", "Sentencia", "Jurisprudencias", "Sentencias"]
 
-# ================================
-# 🔍 UTILIDADES
-# ================================
+# =====================================================
+# 🧩 FUNCIONES AUXILIARES
+# =====================================================
 async def _first_selector(page, selectors: List[str]) -> Optional[str]:
+    """Devuelve el primer selector válido presente en la página."""
     for sel in selectors:
         el = await page.query_selector(sel)
         if el:
             return sel
     return None
 
+
 async def _inner_text_or(page, root, candidates: List[str], default: str = "") -> str:
+    """Obtiene texto interno de un nodo o sus candidatos."""
     for sel in candidates:
         try:
             el = await root.query_selector(sel)
@@ -100,7 +98,9 @@ async def _inner_text_or(page, root, candidates: List[str], default: str = "") -
     except Exception:
         return default
 
+
 def _classify_link_text(texto: str) -> str:
+    """Clasifica un enlace según su texto visible."""
     t = (texto or "").lower()
     if any(k in t for k in DOWNLOAD_ANCHOR_FILTERS):
         return "descarga"
@@ -110,10 +110,11 @@ def _classify_link_text(texto: str) -> str:
         return "jurisprudencia"
     return "otro"
 
-# ================================
-# 🔐 LOGIN UNIVERSAL
-# ================================
+# =====================================================
+# 🔐 LOGIN EN FIELWEB
+# =====================================================
 async def _login(page, base_url: str, user: str, password: str) -> None:
+    """Inicia sesión en FielWeb de forma tolerante a fallas."""
     await page.goto(base_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
 
     user_sel = await _first_selector(page, LOGIN_SELECTORS["user"])
@@ -121,7 +122,7 @@ async def _login(page, base_url: str, user: str, password: str) -> None:
     subm_sel = await _first_selector(page, LOGIN_SELECTORS["submit"])
 
     if not (user_sel and pass_sel and subm_sel):
-        raise RuntimeError("No se encontraron los campos de login en FielWeb (posible cambio de estructura).")
+        raise RuntimeError("No se encontraron los campos de login en FielWeb. Posible cambio de estructura.")
 
     await page.fill(user_sel, user)
     await page.fill(pass_sel, password)
@@ -137,12 +138,13 @@ async def _login(page, base_url: str, user: str, password: str) -> None:
         err = await page.locator(".validation-summary-errors, .text-danger").first
         if await err.count():
             msg = (await err.inner_text()).strip()
-            raise RuntimeError(f"Fallo de autenticación en FielWeb: {msg or 'credenciales inválidas.'}")
+            raise RuntimeError(f"Fallo de autenticación en FielWeb: {msg or 'Credenciales inválidas.'}")
 
-# ================================
-# 🔎 BÚSQUEDA Y EXTRACCIÓN
-# ================================
+# =====================================================
+# 🔎 BÚSQUEDA Y EXTRACCIÓN DE RESULTADOS
+# =====================================================
 async def _buscar(page, texto: str) -> List[Dict[str, Any]]:
+    """Ejecuta una búsqueda y devuelve los resultados estructurados."""
     q_sel = await _first_selector(page, SEARCH_SELECTORS["query"])
     b_sel = await _first_selector(page, SEARCH_SELECTORS["submit"])
     if not (q_sel and b_sel):
@@ -174,14 +176,16 @@ async def _buscar(page, texto: str) -> List[Dict[str, Any]]:
                     abs_url = urljoin(page.url, href)
                     if tipo in {"descarga", "concordancia", "jurisprudencia"}:
                         enlaces.append({"tipo": tipo, "texto": text or "enlace", "url": abs_url})
+
                 items.append({"titulo": titulo, "enlaces": enlaces})
             break
     return items
 
-# ================================
-# 🚀 FUNCIÓN ASÍNCRONA PRINCIPAL
-# ================================
+# =====================================================
+# 🚀 BÚSQUEDA ASÍNCRONA PRINCIPAL
+# =====================================================
 async def _buscar_en_fielweb_async(texto: str) -> Dict[str, Any]:
+    """Realiza todo el flujo de login, búsqueda y extracción."""
     if not (FIELWEB_URL and USERNAME and PASSWORD):
         faltan = [k for k, v in {
             "FIELWEB_LOGIN_URL": FIELWEB_URL,
@@ -199,7 +203,7 @@ async def _buscar_en_fielweb_async(texto: str) -> Dict[str, Any]:
 
         try:
             await _login(page, FIELWEB_URL, USERNAME, PASSWORD)
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(2000)
             resultados = await _buscar(page, texto)
             return {
                 "mensaje": f"Resultados encontrados en FielWeb para '{texto}'.",
@@ -210,10 +214,11 @@ async def _buscar_en_fielweb_async(texto: str) -> Dict[str, Any]:
             await context.close()
             await browser.close()
 
-# ================================
+# =====================================================
 # 🧠 INTERFAZ SINCRÓNICA PARA FASTAPI
-# ================================
+# =====================================================
 def consultar_fielweb(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Interfaz pública usada por FastAPI."""
     texto = (payload.get("texto") or payload.get("consulta") or "").strip()
     if not texto:
         return {"error": "Debe proporcionar un texto de búsqueda en 'texto' o 'consulta'."}
