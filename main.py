@@ -3,6 +3,23 @@ import os
 import traceback
 
 # ============================================
+# 🧩 Compatibilidad AsyncIO (Render / Local)
+# ============================================
+try:
+    import asyncio
+    import nest_asyncio
+
+    # Detectar si el loop actual usa uvloop
+    loop = asyncio.get_event_loop()
+    if "uvloop" not in str(type(loop)).lower():
+        nest_asyncio.apply()
+        print("✅ nest_asyncio aplicado correctamente")
+    else:
+        print("⚠️ uvloop detectado: nest_asyncio no aplicado (modo Render)")
+except Exception as e:
+    print(f"⚠️ No se aplicó nest_asyncio: {e}")
+
+# ============================================
 # 🔌 Importar los conectores (proveedores)
 # ============================================
 try:
@@ -31,15 +48,12 @@ async def verify_api_key(request: Request, call_next):
     """
     skip_check = os.getenv("SKIP_API_KEY_CHECK", "true").lower() == "true"
 
-    # Si está habilitado el modo libre, no se valida
     if skip_check:
         return await call_next(request)
 
-    # Excepciones sin autenticación
     if request.url.path in ["/", "/health", "/favicon.ico", "/check_fielweb_status"]:
         return await call_next(request)
 
-    # Verificación tradicional si se reactiva el control
     key = request.headers.get("X-API-Key")
     if key != API_KEY:
         raise HTTPException(status_code=401, detail="API Key inválida o ausente.")
@@ -62,9 +76,6 @@ async def health():
 # ============================================
 @app.post("/consult_real_fielweb")
 async def consult_fielweb_endpoint(payload: dict):
-    """
-    Consulta el portal FielWeb (leyes, códigos, concordancias, jurisprudencia vinculada).
-    """
     if not consultar_fielweb:
         raise HTTPException(status_code=500, detail="Conector FielWeb no disponible.")
     try:
@@ -75,9 +86,6 @@ async def consult_fielweb_endpoint(payload: dict):
 
 @app.post("/consult_real_jurisprudencia")
 async def consult_jurisprudencia_endpoint(payload: dict):
-    """
-    Consulta en los portales judiciales (SATJE, Corte Constitucional, Corte Nacional).
-    """
     if not consultar_jurisprudencia:
         raise HTTPException(status_code=500, detail="Conector de Jurisprudencia no disponible.")
     try:
@@ -91,12 +99,6 @@ async def consult_jurisprudencia_endpoint(payload: dict):
 # ============================================
 @app.post("/consult_hybrid")
 async def consult_hybrid(payload: dict):
-    """
-    Ejecuta el flujo híbrido:
-    1️⃣ Busca normas y concordancias en FielWeb.
-    2️⃣ Busca jurisprudencia en portales judiciales.
-    3️⃣ Combina los resultados en una respuesta unificada.
-    """
     texto = payload.get("texto", "")
     tipo = payload.get("tipo_usuario", "")
 
@@ -130,9 +132,6 @@ async def consult_hybrid(payload: dict):
 # ============================================
 @app.get("/check_fielweb_status")
 async def check_fielweb_status():
-    """
-    Verifica el estado del entorno, Playwright, credenciales y API key.
-    """
     try:
         import playwright
         from playwright.async_api import async_playwright
