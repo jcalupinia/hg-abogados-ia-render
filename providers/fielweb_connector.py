@@ -3,6 +3,10 @@ import asyncio
 from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
+import nest_asyncio
+
+# Permitir ejecución anidada dentro del loop de FastAPI/Uvicorn
+nest_asyncio.apply()
 
 # ================================
 # ⚙️ CONFIGURACIÓN DESDE ENTORNO
@@ -47,9 +51,7 @@ SEARCH_SELECTORS = {
     ]
 }
 
-RESULT_ITEM_SELECTORS = [
-    ".resultadoItem", ".card-body", "div.resultado", "div.search-result"
-]
+RESULT_ITEM_SELECTORS = [".resultadoItem", ".card-body", "div.resultado", "div.search-result"]
 
 TITLE_CANDIDATES = ["h3", "h2", "h4", "a.title", "a strong", ".titulo", ".title", "a"]
 DOWNLOAD_ANCHOR_FILTERS = ["pdf", "word", "docx"]
@@ -114,13 +116,6 @@ async def _login(page, base_url: str, user: str, password: str) -> None:
     except PWTimeout:
         await page.wait_for_timeout(2000)
 
-    still_login = await page.query_selector(subm_sel)
-    if still_login:
-        err = await page.locator(".validation-summary-errors, .text-danger").first
-        if await err.count():
-            msg = (await err.inner_text()).strip()
-            raise RuntimeError(f"Fallo de autenticación en FielWeb: {msg or 'credenciales inválidas.'}")
-
 # ================================
 # 🔎 BÚSQUEDA Y EXTRACCIÓN
 # ================================
@@ -144,7 +139,6 @@ async def _buscar(page, texto: str) -> List[Dict[str, Any]]:
         if containers:
             for node in containers[:MAX_ITEMS]:
                 titulo = await _inner_text_or(page, node, TITLE_CANDIDATES, default="Resultado sin título")
-
                 enlaces = []
                 links = await node.query_selector_all("a")
                 for a in links:
@@ -165,12 +159,7 @@ async def _buscar(page, texto: str) -> List[Dict[str, Any]]:
 # ================================
 async def _buscar_en_fielweb_async(texto: str) -> Dict[str, Any]:
     if not (FIELWEB_URL and USERNAME and PASSWORD):
-        faltan = [k for k, v in {
-            "FIELWEB_LOGIN_URL": FIELWEB_URL,
-            "FIELWEB_USERNAME": USERNAME,
-            "FIELWEB_PASSWORD": PASSWORD
-        }.items() if not v]
-        raise RuntimeError(f"Faltan variables de entorno: {', '.join(faltan)}")
+        raise RuntimeError("Faltan variables de entorno: FIELWEB_LOGIN_URL, FIELWEB_USERNAME o FIELWEB_PASSWORD")
 
     launch_args = ["--no-sandbox", "--disable-dev-shm-usage"]
     async with async_playwright() as p:
@@ -193,7 +182,7 @@ async def _buscar_en_fielweb_async(texto: str) -> Dict[str, Any]:
             await browser.close()
 
 # ================================
-# 🧠 INTERFAZ SINCRÓNICA PARA FASTAPI
+# 🧠 INTERFAZ PÚBLICA PARA FASTAPI
 # ================================
 def consultar_fielweb(payload: Dict[str, Any]) -> Dict[str, Any]:
     texto = (payload.get("texto") or payload.get("consulta") or "").strip()
@@ -202,10 +191,7 @@ def consultar_fielweb(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         loop = asyncio.get_event_loop()
-        if loop.is_running():
-            return loop.run_until_complete(_buscar_en_fielweb_async(texto))
-        else:
-            return asyncio.run(_buscar_en_fielweb_async(texto))
+        return loop.run_until_complete(_buscar_en_fielweb_async(texto))
     except PWTimeout as te:
         return {"error": f"Tiempo de espera agotado en FielWeb: {str(te)}", "nivel_consulta": "FielWeb"}
     except Exception as e:
