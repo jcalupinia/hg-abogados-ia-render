@@ -5,20 +5,19 @@ from urllib.parse import urljoin
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
 # ================================
-# 🧩 Compatibilidad segura con Render / Uvicorn
+# 🧩 Compatibilidad segura con Render / Uvicorn (uvloop)
 # ================================
 try:
     import nest_asyncio
     loop = asyncio.get_event_loop()
-    # Evita aplicar nest_asyncio si Render usa uvloop (ya optimizado)
-    if "uvloop" not in str(type(loop)):
+    # Si Render usa uvloop, no aplicar el parche
+    if "uvloop" not in str(type(loop)).lower():
         nest_asyncio.apply()
-        print("✅ nest_asyncio aplicado correctamente (loop estándar detectado).")
+        print("✅ nest_asyncio aplicado (loop estándar detectado)")
     else:
-        print("⚙️ uvloop detectado (Render) — no se aplica nest_asyncio.")
+        print("⚙️ uvloop detectado, nest_asyncio no se aplica (modo Render seguro)")
 except Exception as e:
-    print(f"⚠️ Advertencia: No fue posible aplicar nest_asyncio: {e}")
-
+    print(f"⚠️ Advertencia: no se aplicó nest_asyncio ({e})")
 # ================================
 # ⚙️ CONFIGURACIÓN DESDE ENTORNO
 # ================================
