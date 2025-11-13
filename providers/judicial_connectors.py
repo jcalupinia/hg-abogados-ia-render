@@ -3,7 +3,6 @@ import asyncio
 from typing import List, Dict, Any
 from urllib.parse import urljoin
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
-import nest_asyncio
 
 nest_asyncio.apply()  # 👈 Corrige el conflicto del event loop
 
