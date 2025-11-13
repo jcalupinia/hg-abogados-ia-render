@@ -34,4 +34,5 @@ ENV PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
 EXPOSE 10000
 
 # ---- Comando de ejecución ----
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000}"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000} --loop asyncio"]
+
