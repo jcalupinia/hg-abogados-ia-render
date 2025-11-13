@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpangocairo-1.0-0 libpango-1.0-0 libcairo2 \
     libxrandr2 libxkbcommon0 libasound2 libatspi2.0-0 \
     libxshmfence1 libgbm1 fonts-liberation \
+    libcups2 \
     && rm -rf /var/lib/apt/lists/*
 
 # ---- Directorio de trabajo ----
@@ -34,5 +35,4 @@ ENV PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
 EXPOSE 10000
 
 # ---- Comando de ejecución ----
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000} --loop asyncio"]
-
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000}"]
