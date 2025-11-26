@@ -38,6 +38,7 @@ except ModuleNotFoundError as e:
 # ============================================
 app = FastAPI(title="H&G Abogados IA - Robot Jurídico Inteligente")
 API_KEY = os.getenv("X_API_KEY", "HYGABOGADOS-SECURE-2025")
+API_KEY_DISABLED = os.getenv("DISABLE_API_KEY", "false").lower() == "true"
 
 # ============================================
 # 🔐 Middleware de seguridad por API Key
