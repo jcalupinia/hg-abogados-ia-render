@@ -27,6 +27,7 @@ if PACKAGE_ROOT not in sys.path:
 # ================================
 consultar_fielweb = None
 consultar_jurisprudencia = None
+consultar_uafe = None
 
 try:
     from .fielweb_connector import consultar_fielweb
@@ -46,6 +47,16 @@ except Exception as e:
     consultar_jurisprudencia = lambda *args, **kwargs: {
         "error": f"No se pudo importar conector Judicial: {e}",
         "nivel_consulta": "Jurisprudencia"
+    }
+
+try:
+    from .uafe_connector import consultar_uafe
+except Exception as e:
+    print("⚠️ [INIT] Error al importar conector UAFE:")
+    traceback.print_exc()
+    consultar_uafe = lambda *args, **kwargs: {
+        "error": f"No se pudo importar conector UAFE: {e}",
+        "nivel_consulta": "UAFE"
     }
 
 # ================================
@@ -74,6 +85,11 @@ def check_providers_status() -> dict:
     status["judicial_connector"] = (
         "✅ Importado correctamente"
         if callable(consultar_jurisprudencia)
+        else "❌ No cargado"
+    )
+    status["uafe_connector"] = (
+        "✅ Importado correctamente"
+        if callable(consultar_uafe)
         else "❌ No cargado"
     )
 
@@ -109,4 +125,3 @@ if __name__ == "__main__":
     for k, v in estado.items():
         print(f"{k}: {v}")
     print("✅ Diagnóstico completado.")
-
