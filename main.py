@@ -56,6 +56,7 @@ async def verify_api_key(request: Request, call_next):
         "/check_external_sources",
         "/check_corte_nacional_status",
         "/check_corte_constitucional_status",
+        "/check_uafe_status",
     ]
     if request.url.path in allowed_routes or API_KEY_DISABLED or not API_KEY:
         return await call_next(request)
@@ -180,7 +181,8 @@ async def check_external_sources():
         ("sri_principal", "SRI (principal)", "https://www.sri.gob.ec/"),
         ("trabajo", "Ministerio de Trabajo", "https://www.trabajo.gob.ec/"),
         ("supercias", "Superintendencia de Compañías", "https://www.supercias.gob.ec/portalscvs/index.htm"),
-        ("senae", "SENAE", "https://www.aduana.gob.ec/")
+        ("senae", "SENAE", "https://www.aduana.gob.ec/"),
+        ("uafe", "UAFE", os.getenv("UAFE_URL", "https://www.uafe.gob.ec/resoluciones-sujetos-obligados/"))
     ]
 
     resultados = [{
@@ -239,6 +241,27 @@ async def check_corte_constitucional_status():
     except Exception as e:
         return JSONResponse(
             content={"error": f"Fallo interno al verificar Corte Constitucional: {e}"},
+            status_code=200
+        )
+
+@app.get("/check_uafe_status")
+async def check_uafe_status():
+    """Diagnóstico rápido de conectividad al portal de UAFE (resoluciones)."""
+    try:
+        url = os.getenv("UAFE_URL", "https://www.uafe.gob.ec/resoluciones-sujetos-obligados/")
+        detalle = [{"id": "uafe", **_ping_url(url, "UAFE")}]
+        payload = {
+            "resumen": {
+                "total": len(detalle),
+                "ok": sum(1 for r in detalle if r.get("ok")),
+                "fallidos": [r["fuente"] for r in detalle if not r.get("ok")]
+            },
+            "detalle": detalle
+        }
+        return JSONResponse(content=payload, status_code=200)
+    except Exception as e:
+        return JSONResponse(
+            content={"error": f"Fallo interno al verificar UAFE: {e}"},
             status_code=200
         )
 
