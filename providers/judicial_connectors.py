@@ -37,8 +37,8 @@ aplicar_nest_asyncio_si_es_necesario()
 URLS = {
     "satje": os.getenv("SATJE_URL", "https://satje.funcionjudicial.gob.ec/busquedaSentencias.aspx").strip(),
     "corte_constitucional": os.getenv("CORTE_CONSTITUCIONAL_URL", "https://portal.corteconstitucional.gob.ec/FichaRelatoria").strip(),
-    "corte_nacional": os.getenv("CORTE_NACIONAL_URL", "https://portalcortej.justicia.gob.ec/FichaRelatoria").strip(),
-    "corte_nacional_nuevo": os.getenv("CORTE_NACIONAL_NUEVO_URL", "https://busquedasentencias.cortenacional.gob.ec/").strip(),
+    # Se utiliza el buscador nuevo como URL principal de la Corte Nacional
+    "corte_nacional": os.getenv("CORTE_NACIONAL_URL", "https://busquedasentencias.cortenacional.gob.ec/").strip(),
 }
 
 PAGE_TIMEOUT_MS = 30_000
@@ -167,42 +167,10 @@ async def _buscar_corte_constitucional(page, texto: str) -> List[Dict[str, Any]]
     return _dedup(resultados)
 
 async def _buscar_corte_nacional(page, texto: str) -> List[Dict[str, Any]]:
-    """Corte Nacional de Justicia"""
-    debug_log(f"Consultando Corte Nacional con: {texto}")
-    resultados = []
-    await page.goto(URLS["corte_nacional"], wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
-
-    q_sel = await _first_selector(page, ["#txtPalabraClave", 'input[id*="Palabra"]'])
-    b_sel = await _first_selector(page, ["#btnBuscar", 'button[id*="btnBuscar"]'])
-    if not q_sel or not b_sel:
-        return []
-
-    await page.fill(q_sel, texto)
-    await page.click(b_sel)
-    try:
-        await page.wait_for_load_state("networkidle", timeout=NAV_TIMEOUT_MS)
-    except PWTimeout:
-        await page.wait_for_timeout(1500)
-
-    nodes = await page.query_selector_all(".panel-body, .list-group-item, .card, tr")
-    for n in nodes[:MAX_ITEMS]:
-        txt = await _safe_inner_text(n)
-        for a in await n.query_selector_all("a"):
-            href = await a.get_attribute("href")
-            if href:
-                resultados.append({
-                    "fuente": "Corte Nacional de Justicia",
-                    "titulo": txt.split("\n")[0][:140],
-                    "descripcion": "Precedente o Relatoría CNJ",
-                    "url": _abs_url(page.url, href)
-                })
-    return _dedup(resultados)
-
-async def _buscar_corte_nacional_nuevo(page, texto: str) -> List[Dict[str, Any]]:
     """Corte Nacional - buscador nuevo (busquedasentencias.cortenacional.gob.ec)"""
     debug_log(f"Consultando Corte Nacional (nuevo) con: {texto}")
     resultados = []
-    await page.goto(URLS["corte_nacional_nuevo"], wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+    await page.goto(URLS["corte_nacional"], wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
 
     q_sel = await _first_selector(page, [
         'input[placeholder*="Digite"]',
@@ -279,7 +247,6 @@ async def _buscar_juris_async(texto: str) -> Dict[str, Any]:
             for fuente, funcion in [
                 ("SATJE", _buscar_satje),
                 ("Corte Constitucional", _buscar_corte_constitucional),
-                ("Corte Nacional de Justicia (nuevo)", _buscar_corte_nacional_nuevo),
                 ("Corte Nacional de Justicia", _buscar_corte_nacional),
             ]:
                 try:
