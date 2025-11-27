@@ -197,6 +197,11 @@ async def check_external_sources(fuente: Optional[str] = None):
         "detalle": resultados
     }
 
+@app.get("/check_external_sources/{fuente_id}")
+async def check_external_source_single(fuente_id: str):
+    """Alias para probar una sola fuente usando path param en lugar de query param."""
+    return await check_external_sources(fuente=fuente_id)
+    
 @app.get("/check_fielweb_status")
 async def check_fielweb_status():
     """
