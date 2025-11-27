@@ -30,10 +30,12 @@ except Exception as e:
 try:
     from providers.fielweb_connector import consultar_fielweb
     from providers.judicial_connectors import consultar_jurisprudencia
+    from providers.uafe_connector import consultar_uafe
     print("✅ Conectores cargados correctamente.")
 except ModuleNotFoundError as e:
     consultar_fielweb = None
     consultar_jurisprudencia = None
+    consultar_uafe = None
     print(f"⚠️ Error al importar conectores: {e}")
 
 # ============================================
@@ -102,6 +104,19 @@ async def consult_jurisprudencia_endpoint(payload: dict):
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error Jurisprudencia: {str(e)}")
+
+# ============================================
+# 🔎 Consulta UAFE (sujetos obligados)
+# ============================================
+@app.post("/consult_real_uafe")
+async def consult_uafe_endpoint(payload: dict):
+    if not consultar_uafe:
+        raise HTTPException(status_code=500, detail="Conector UAFE no disponible.")
+    try:
+        return consultar_uafe(payload)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error UAFE: {str(e)}")
 
 # ============================================
 # 🤖 Flujo Híbrido (Normativa + Jurisprudencia)
