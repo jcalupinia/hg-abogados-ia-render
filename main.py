@@ -7,6 +7,7 @@
 from fastapi import FastAPI, Request, HTTPException
 import os, traceback, asyncio
 import requests
+from typing import Optional
 import uvloop
 import nest_asyncio
 
@@ -150,28 +151,43 @@ def _ping_url(url: str, label: str) -> dict:
         }
 
 @app.get("/check_external_sources")
-async def check_external_sources():
+async def check_external_sources(fuente: Optional[str] = None):
     """
     Verifica conectividad HTTP a las fuentes externas sin credenciales.
     Incluye FielWeb, portales judiciales y organismos oficiales.
     """
     fuentes = [
-        ("FielWeb", os.getenv("FIELWEB_LOGIN_URL", "https://www.fielweb.com/Cuenta/Login.aspx")),
-        ("SATJE", "https://www.funcionjudicial.gob.ec"),
-        ("Procesos Judiciales (búsqueda)", "https://procesosjudiciales.funcionjudicial.gob.ec/busqueda"),
-        ("Corte Constitucional (portal)", "https://www.corteconstitucional.gob.ec/"),
-        ("Corte Constitucional (relatoría)", os.getenv("CORTE_CONSTITUCIONAL_URL", "https://portal.corteconstitucional.gob.ec/FichaRelatoria")),
-        ("Corte Nacional (portal)", "https://www.cortenacional.gob.ec/cnj/"),
-        ("Corte Nacional (ficha relatoría)", os.getenv("CORTE_NACIONAL_URL", "https://portalcortej.justicia.gob.ec/FichaRelatoria")),
-        ("Consejo de la Judicatura", "https://www.funcionjudicial.gob.ec/"),
-        ("Tribunal Contencioso Electoral", "https://www.tce.gob.ec/"),
-        ("SRI (home)", "https://www.sri.gob.ec/web/intersri/home"),
-        ("SRI (principal)", "https://www.sri.gob.ec/"),
-        ("Ministerio de Trabajo", "https://www.trabajo.gob.ec/"),
-        ("Superintendencia de Compañías", "https://www.supercias.gob.ec/portalscvs/index.htm"),
-        ("SENAE", "https://www.aduana.gob.ec/")
+        ("fielweb", "FielWeb", os.getenv("FIELWEB_LOGIN_URL", "https://www.fielweb.com/Cuenta/Login.aspx")),
+        ("satje", "SATJE", "https://www.funcionjudicial.gob.ec"),
+        ("procesos_judiciales", "Procesos Judiciales (búsqueda)", "https://procesosjudiciales.funcionjudicial.gob.ec/busqueda"),
+        ("corte_constitucional_portal", "Corte Constitucional (portal)", "https://www.corteconstitucional.gob.ec/"),
+        ("corte_constitucional_relatoria", "Corte Constitucional (relatoría)", os.getenv("CORTE_CONSTITUCIONAL_URL", "https://portal.corteconstitucional.gob.ec/FichaRelatoria")),
+        ("corte_nacional_portal", "Corte Nacional (portal)", "https://www.cortenacional.gob.ec/cnj/"),
+        ("corte_nacional_relatoria", "Corte Nacional (ficha relatoría)", os.getenv("CORTE_NACIONAL_URL", "https://portalcortej.justicia.gob.ec/FichaRelatoria")),
+        ("corte_nacional_nuevo", "Corte Nacional (buscador nuevo)", os.getenv("CORTE_NACIONAL_NUEVO_URL", "https://busquedasentencias.cortenacional.gob.ec/")),
+        ("consejo_judicatura", "Consejo de la Judicatura", "https://www.funcionjudicial.gob.ec/"),
+        ("tce", "Tribunal Contencioso Electoral", "https://www.tce.gob.ec/"),
+        ("sri_home", "SRI (home)", "https://www.sri.gob.ec/web/intersri/home"),
+        ("sri_principal", "SRI (principal)", "https://www.sri.gob.ec/"),
+        ("trabajo", "Ministerio de Trabajo", "https://www.trabajo.gob.ec/"),
+        ("supercias", "Superintendencia de Compañías", "https://www.supercias.gob.ec/portalscvs/index.htm"),
+        ("senae", "SENAE", "https://www.aduana.gob.ec/")
     ]
-    resultados = [_ping_url(url, label) for label, url in fuentes]
+
+    if fuente:
+        f_lower = fuente.lower()
+        fuentes_filtradas = [f for f in fuentes if f_lower in (f[0], f[1].lower())]
+        if not fuentes_filtradas:
+            return {
+                "error": f"Fuente '{fuente}' no soportada.",
+                "fuentes_disponibles": [f[0] for f in fuentes]
+            }
+        fuentes = fuentes_filtradas
+
+    resultados = [{
+        "id": fid,
+        **_ping_url(url, label)
+    } for fid, label, url in fuentes]
     return {
         "resumen": {
             "total": len(resultados),
