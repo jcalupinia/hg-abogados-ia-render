@@ -47,7 +47,14 @@ API_KEY_DISABLED = os.getenv("DISABLE_API_KEY", "false").lower() == "true"
 # ============================================
 @app.middleware("http")
 async def verify_api_key(request: Request, call_next):
-    allowed_routes = ["/", "/health", "/favicon.ico", "/check_fielweb_status"]
+    allowed_routes = [
+        "/",
+        "/health",
+        "/favicon.ico",
+        "/check_fielweb_status",
+        "/check_external_sources",
+        "/check_corte_nacional_status",
+    ]
     if request.url.path in allowed_routes or API_KEY_DISABLED or not API_KEY:
         return await call_next(request)
 
@@ -190,21 +197,26 @@ async def check_external_sources():
 @app.get("/check_corte_nacional_status")
 async def check_corte_nacional_status():
     """Diagnóstico rápido de conectividad a los portales de la Corte Nacional (antiguo y nuevo)."""
-    urls = {
-        "corte_nacional_relatoria": os.getenv("CORTE_NACIONAL_URL", "https://portalcortej.justicia.gob.ec/FichaRelatoria"),
-        "corte_nacional_nuevo": os.getenv("CORTE_NACIONAL_NUEVO_URL", "https://busquedasentencias.cortenacional.gob.ec/")
-    }
-    detalle = []
-    for fid, url in urls.items():
-        detalle.append({"id": fid, **_ping_url(url, fid)})
-    return {
-        "resumen": {
-            "total": len(detalle),
-            "ok": sum(1 for r in detalle if r.get("ok")),
-            "fallidos": [r["fuente"] for r in detalle if not r.get("ok")]
-        },
-        "detalle": detalle
-    }
+    try:
+        urls = {
+            "corte_nacional_relatoria": os.getenv("CORTE_NACIONAL_URL", "https://portalcortej.justicia.gob.ec/FichaRelatoria"),
+            "corte_nacional_nuevo": os.getenv("CORTE_NACIONAL_NUEVO_URL", "https://busquedasentencias.cortenacional.gob.ec/")
+        }
+        detalle = []
+        for fid, url in urls.items():
+            detalle.append({"id": fid, **_ping_url(url, fid)})
+        return {
+            "resumen": {
+                "total": len(detalle),
+                "ok": sum(1 for r in detalle if r.get("ok")),
+                "fallidos": [r["fuente"] for r in detalle if not r.get("ok")]
+            },
+            "detalle": detalle
+        }
+    except Exception as e:
+        return {
+            "error": f"Fallo interno al verificar Corte Nacional: {e}"
+        }
 
 @app.get("/check_fielweb_status")
 async def check_fielweb_status():
