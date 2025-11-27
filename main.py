@@ -5,6 +5,7 @@
 # ======================================================
 
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
 import os, traceback, asyncio
 import requests
 from typing import Optional
@@ -54,6 +55,7 @@ async def verify_api_key(request: Request, call_next):
         "/check_fielweb_status",
         "/check_external_sources",
         "/check_corte_nacional_status",
+        "/check_corte_constitucional_status",
     ]
     if request.url.path in allowed_routes or API_KEY_DISABLED or not API_KEY:
         return await call_next(request)
@@ -199,13 +201,12 @@ async def check_corte_nacional_status():
     """Diagnóstico rápido de conectividad a los portales de la Corte Nacional (antiguo y nuevo)."""
     try:
         urls = {
-            "corte_nacional_relatoria": os.getenv("CORTE_NACIONAL_URL", "https://portalcortej.justicia.gob.ec/FichaRelatoria"),
-            "corte_nacional_nuevo": os.getenv("CORTE_NACIONAL_NUEVO_URL", "https://busquedasentencias.cortenacional.gob.ec/")
+            "corte_nacional": os.getenv("CORTE_NACIONAL_URL", "https://busquedasentencias.cortenacional.gob.ec/")
         }
         detalle = []
         for fid, url in urls.items():
             detalle.append({"id": fid, **_ping_url(url, fid)})
-        return {
+        payload = {
             "resumen": {
                 "total": len(detalle),
                 "ok": sum(1 for r in detalle if r.get("ok")),
@@ -213,10 +214,33 @@ async def check_corte_nacional_status():
             },
             "detalle": detalle
         }
+        return JSONResponse(content=payload, status_code=200)
     except Exception as e:
-        return {
-            "error": f"Fallo interno al verificar Corte Nacional: {e}"
+        return JSONResponse(
+            content={"error": f"Fallo interno al verificar Corte Nacional: {e}"},
+            status_code=200
+        )
+
+@app.get("/check_corte_constitucional_status")
+async def check_corte_constitucional_status():
+    """Diagnóstico rápido de conectividad al buscador de la Corte Constitucional."""
+    try:
+        url = os.getenv("CORTE_CONSTITUCIONAL_URL", "http://buscador.corteconstitucional.gob.ec/buscador-externo/principal")
+        detalle = [{"id": "corte_constitucional", **_ping_url(url, "Corte Constitucional")}]
+        payload = {
+            "resumen": {
+                "total": len(detalle),
+                "ok": sum(1 for r in detalle if r.get("ok")),
+                "fallidos": [r["fuente"] for r in detalle if not r.get("ok")]
+            },
+            "detalle": detalle
         }
+        return JSONResponse(content=payload, status_code=200)
+    except Exception as e:
+        return JSONResponse(
+            content={"error": f"Fallo interno al verificar Corte Constitucional: {e}"},
+            status_code=200
+        )
 
 @app.get("/check_fielweb_status")
 async def check_fielweb_status():
