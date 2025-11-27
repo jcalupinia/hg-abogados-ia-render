@@ -38,11 +38,32 @@ URLS = {
     "satje": os.getenv("SATJE_URL", "https://satje.funcionjudicial.gob.ec/busquedaSentencias.aspx").strip(),
     "corte_constitucional": os.getenv("CORTE_CONSTITUCIONAL_URL", "https://portal.corteconstitucional.gob.ec/FichaRelatoria").strip(),
     "corte_nacional": os.getenv("CORTE_NACIONAL_URL", "https://portalcortej.justicia.gob.ec/FichaRelatoria").strip(),
+    "corte_nacional_nuevo": os.getenv("CORTE_NACIONAL_NUEVO_URL", "https://busquedasentencias.cortenacional.gob.ec/").strip(),
 }
 
 PAGE_TIMEOUT_MS = 30_000
 NAV_TIMEOUT_MS  = 35_000
 MAX_ITEMS       = 10
+
+# ================================
+# Proxy opcional desde entorno
+# ================================
+def _proxy_config() -> Optional[dict]:
+    """
+    Construye la configuración de proxy si se definen:
+    HTTP_PROXY/HTTPS_PROXY (server) y HTTP_PROXY_USER/HTTP_PROXY_PASS (auth opcional).
+    """
+    proxy = os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
+    if not proxy:
+        return None
+    cfg = {"server": proxy}
+    user = os.getenv("HTTP_PROXY_USER")
+    pwd = os.getenv("HTTP_PROXY_PASS")
+    if user:
+        cfg["username"] = user
+        if pwd:
+            cfg["password"] = pwd
+    return cfg
 
 # ================================
 # 🔧 UTILIDADES INTERNAS
@@ -177,6 +198,56 @@ async def _buscar_corte_nacional(page, texto: str) -> List[Dict[str, Any]]:
                 })
     return _dedup(resultados)
 
+async def _buscar_corte_nacional_nuevo(page, texto: str) -> List[Dict[str, Any]]:
+    """Corte Nacional - buscador nuevo (busquedasentencias.cortenacional.gob.ec)"""
+    debug_log(f"Consultando Corte Nacional (nuevo) con: {texto}")
+    resultados = []
+    await page.goto(URLS["corte_nacional_nuevo"], wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+
+    q_sel = await _first_selector(page, [
+        'input[placeholder*="Digite"]',
+        'input[placeholder*="Buscar"]',
+        'input[type="text"]'
+    ])
+    b_sel = await _first_selector(page, ['button:has-text("Buscar")', 'button[type="submit"]'])
+    if not q_sel or not b_sel:
+        return []
+
+    await page.fill(q_sel, texto[:50])
+    await page.click(b_sel)
+    try:
+        await page.wait_for_load_state("networkidle", timeout=NAV_TIMEOUT_MS)
+    except PWTimeout:
+        await page.wait_for_timeout(1500)
+
+    cards = await page.query_selector_all("div, article, li")
+    for card in cards:
+        try:
+            anchor = await card.query_selector('a[href*="Proceso"], a[href*="proceso"], a[href*=".pdf"], a')
+            if not anchor:
+                continue
+            href = await anchor.get_attribute("href")
+            if not href:
+                continue
+            titulo = (await anchor.inner_text()) or ""
+            descripcion = await _safe_inner_text(card, "")
+
+            pdf_link = await card.query_selector('a[href$=".pdf"], a[href*=".pdf"]')
+            if pdf_link:
+                pdf_href = await pdf_link.get_attribute("href")
+            else:
+                pdf_href = None
+
+            resultados.append({
+                "fuente": "Corte Nacional de Justicia (nuevo)",
+                "titulo": titulo.strip()[:180] or "Sentencia Corte Nacional",
+                "descripcion": descripcion.split("\n")[0][:200],
+                "url": _abs_url(page.url, pdf_href or href)
+            })
+        except Exception:
+            continue
+    return _dedup(resultados)
+
 # ================================
 # 🚀 FUNCIÓN ASÍNCRONA PRINCIPAL
 # ================================
@@ -191,10 +262,13 @@ async def _buscar_juris_async(texto: str) -> Dict[str, Any]:
         "--disable-setuid-sandbox",
         "--disable-web-security"
     ]
+    proxy_cfg = _proxy_config()
+    if proxy_cfg:
+        debug_log(f"Usando proxy: {proxy_cfg.get('server')}")
 
     debug_log("Lanzando navegador Chromium para consultas judiciales...")
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=launch_args)
+        browser = await p.chromium.launch(headless=True, args=launch_args, proxy=proxy_cfg)
         context = await browser.new_context()
         page = await context.new_page()
         page.set_default_timeout(PAGE_TIMEOUT_MS)
@@ -205,6 +279,7 @@ async def _buscar_juris_async(texto: str) -> Dict[str, Any]:
             for fuente, funcion in [
                 ("SATJE", _buscar_satje),
                 ("Corte Constitucional", _buscar_corte_constitucional),
+                ("Corte Nacional de Justicia (nuevo)", _buscar_corte_nacional_nuevo),
                 ("Corte Nacional de Justicia", _buscar_corte_nacional),
             ]:
                 try:
