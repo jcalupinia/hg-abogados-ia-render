@@ -151,7 +151,7 @@ def _ping_url(url: str, label: str) -> dict:
         }
 
 @app.get("/check_external_sources")
-async def check_external_sources(fuente: Optional[str] = None):
+async def check_external_sources():
     """
     Verifica conectividad HTTP a las fuentes externas sin credenciales.
     Incluye FielWeb, portales judiciales y organismos oficiales.
@@ -174,16 +174,6 @@ async def check_external_sources(fuente: Optional[str] = None):
         ("senae", "SENAE", "https://www.aduana.gob.ec/")
     ]
 
-    if fuente:
-        f_lower = fuente.lower()
-        fuentes_filtradas = [f for f in fuentes if f_lower in (f[0], f[1].lower())]
-        if not fuentes_filtradas:
-            return {
-                "error": f"Fuente '{fuente}' no soportada.",
-                "fuentes_disponibles": [f[0] for f in fuentes]
-            }
-        fuentes = fuentes_filtradas
-
     resultados = [{
         "id": fid,
         **_ping_url(url, label)
@@ -196,14 +186,6 @@ async def check_external_sources(fuente: Optional[str] = None):
         },
         "detalle": resultados
     }
-
-@app.get("/check_external_sources/{fuente_id}")
-async def check_external_source_single(fuente_id: str):
-    """Alias para probar una sola fuente usando path param en lugar de query param."""
-    return await check_external_sources(fuente=fuente_id)
-
-    """Alias para probar una sola fuente usando path param en lugar de query param."""
-    return await check_external_sources(fuente=fuente_id)
 
 @app.get("/check_corte_nacional_status")
 async def check_corte_nacional_status():
@@ -223,7 +205,7 @@ async def check_corte_nacional_status():
         },
         "detalle": detalle
     }
-    
+
 @app.get("/check_fielweb_status")
 async def check_fielweb_status():
     """
