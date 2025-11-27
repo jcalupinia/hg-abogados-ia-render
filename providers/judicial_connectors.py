@@ -36,7 +36,7 @@ aplicar_nest_asyncio_si_es_necesario()
 # ================================
 URLS = {
     "satje": os.getenv("SATJE_URL", "https://satje.funcionjudicial.gob.ec/busquedaSentencias.aspx").strip(),
-    "corte_constitucional": os.getenv("CORTE_CONSTITUCIONAL_URL", "https://portal.corteconstitucional.gob.ec/FichaRelatoria").strip(),
+    "corte_constitucional": os.getenv("CORTE_CONSTITUCIONAL_URL", "http://buscador.corteconstitucional.gob.ec/buscador-externo/principal").strip(),
     # Se utiliza el buscador nuevo como URL principal de la Corte Nacional
     "corte_nacional": os.getenv("CORTE_NACIONAL_URL", "https://busquedasentencias.cortenacional.gob.ec/").strip(),
 }
@@ -135,24 +135,36 @@ async def _buscar_satje(page, texto: str) -> List[Dict[str, Any]]:
     return _dedup(resultados)
 
 async def _buscar_corte_constitucional(page, texto: str) -> List[Dict[str, Any]]:
-    """Corte Constitucional"""
+    """Corte Constitucional - buscador externo"""
     debug_log(f"Consultando Corte Constitucional con: {texto}")
     resultados = []
     await page.goto(URLS["corte_constitucional"], wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
 
-    q_sel = await _first_selector(page, ["#txtPalabraClave", 'input[id*="Palabra"]'])
-    b_sel = await _first_selector(page, ["#btnBuscar", 'button[id*="btnBuscar"]'])
+    # Input principal y botón de búsqueda (ícono de lupa)
+    q_sel = await _first_selector(page, [
+        'input[placeholder*="Digite el texto"]',
+        'input[placeholder*="Buscar"]',
+        'input[name*="texto"]',
+        'input[type="text"]'
+    ])
+    b_sel = await _first_selector(page, [
+        'button:has-text("Buscar")',
+        'button[aria-label*="Buscar"]',
+        'button[type="submit"]',
+        'button:has(svg)'
+    ])
     if not q_sel or not b_sel:
         return []
 
-    await page.fill(q_sel, texto)
+    await page.fill(q_sel, texto[:250])
     await page.click(b_sel)
     try:
         await page.wait_for_load_state("networkidle", timeout=NAV_TIMEOUT_MS)
     except PWTimeout:
         await page.wait_for_timeout(1500)
 
-    nodes = await page.query_selector_all(".list-group-item, .panel-body, tr, .resultado")
+    # Tarjetas de resultado: anclas a detalles/PDF
+    nodes = await page.query_selector_all("div, article, li, tr")
     for n in nodes[:MAX_ITEMS]:
         txt = await _safe_inner_text(n)
         for a in await n.query_selector_all("a"):
@@ -161,7 +173,7 @@ async def _buscar_corte_constitucional(page, texto: str) -> List[Dict[str, Any]]
                 resultados.append({
                     "fuente": "Corte Constitucional",
                     "titulo": txt.split("\n")[0][:140],
-                    "descripcion": "Relatoría Constitucional",
+                    "descripcion": "Relatoría o sentencia Corte Constitucional",
                     "url": _abs_url(page.url, href)
                 })
     return _dedup(resultados)
