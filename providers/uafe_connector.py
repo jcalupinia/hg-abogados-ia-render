@@ -1,5 +1,6 @@
 import os
 import requests
+from requests.exceptions import SSLError
 from bs4 import BeautifulSoup
 from typing import Dict, Any, List
 
@@ -11,7 +12,11 @@ def _fetch_uafe_html(url: str) -> str:
     headers = {
         "User-Agent": "Mozilla/5.0 (H&G Abogados IA)"
     }
-    resp = requests.get(url, headers=headers, timeout=15)
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+    except SSLError:
+        # Algunos sitios oficiales presentan problemas de cadena de certificados
+        resp = requests.get(url, headers=headers, timeout=15, verify=False)
     resp.raise_for_status()
     return resp.text
 
