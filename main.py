@@ -6,6 +6,7 @@
 
 from fastapi import FastAPI, Request, HTTPException
 import os, traceback, asyncio
+import requests
 import uvloop
 import nest_asyncio
 
@@ -37,7 +38,7 @@ except ModuleNotFoundError as e:
 # 🚀 Inicialización del servicio FastAPI
 # ============================================
 app = FastAPI(title="H&G Abogados IA - Robot Jurídico Inteligente")
-API_KEY = os.getenv("X_API_KEY", "HYGABOGADOS-SECURE-2025")
+API_KEY = os.getenv("X_API_KEY")
 API_KEY_DISABLED = os.getenv("DISABLE_API_KEY", "false").lower() == "true"
 
 # ============================================
@@ -46,7 +47,7 @@ API_KEY_DISABLED = os.getenv("DISABLE_API_KEY", "false").lower() == "true"
 @app.middleware("http")
 async def verify_api_key(request: Request, call_next):
     allowed_routes = ["/", "/health", "/favicon.ico", "/check_fielweb_status"]
-    if request.url.path in allowed_routes:
+    if request.url.path in allowed_routes or API_KEY_DISABLED or not API_KEY:
         return await call_next(request)
 
     key = request.headers.get("X-API-Key")
@@ -127,6 +128,59 @@ async def consult_hybrid(payload: dict):
 # ============================================
 # 🧠 Diagnóstico de entorno
 # ============================================
+def _ping_url(url: str, label: str) -> dict:
+    """Prueba de conectividad HTTP simple con User-Agent de navegador."""
+    headers = {"User-Agent": "Mozilla/5.0 (H&G Abogados IA)"}
+    try:
+        resp = requests.get(url, timeout=10, headers=headers, allow_redirects=True)
+        return {
+            "fuente": label,
+            "url": url,
+            "status": resp.status_code,
+            "ok": 200 <= resp.status_code < 400,
+            "final_url": str(resp.url)
+        }
+    except Exception as e:
+        return {
+            "fuente": label,
+            "url": url,
+            "status": None,
+            "ok": False,
+            "error": str(e)
+        }
+
+@app.get("/check_external_sources")
+async def check_external_sources():
+    """
+    Verifica conectividad HTTP a las fuentes externas sin credenciales.
+    Incluye FielWeb, portales judiciales y organismos oficiales.
+    """
+    fuentes = [
+        ("FielWeb", os.getenv("FIELWEB_LOGIN_URL", "https://www.fielweb.com/Cuenta/Login.aspx")),
+        ("SATJE", "https://www.funcionjudicial.gob.ec"),
+        ("Procesos Judiciales (búsqueda)", "https://procesosjudiciales.funcionjudicial.gob.ec/busqueda"),
+        ("Corte Constitucional (portal)", "https://www.corteconstitucional.gob.ec/"),
+        ("Corte Constitucional (relatoría)", os.getenv("CORTE_CONSTITUCIONAL_URL", "https://portal.corteconstitucional.gob.ec/FichaRelatoria")),
+        ("Corte Nacional (portal)", "https://www.cortenacional.gob.ec/cnj/"),
+        ("Corte Nacional (ficha relatoría)", os.getenv("CORTE_NACIONAL_URL", "https://portalcortej.justicia.gob.ec/FichaRelatoria")),
+        ("Consejo de la Judicatura", "https://www.funcionjudicial.gob.ec/"),
+        ("Tribunal Contencioso Electoral", "https://www.tce.gob.ec/"),
+        ("SRI (home)", "https://www.sri.gob.ec/web/intersri/home"),
+        ("SRI (principal)", "https://www.sri.gob.ec/"),
+        ("Ministerio de Trabajo", "https://www.trabajo.gob.ec/"),
+        ("Superintendencia de Compañías", "https://www.supercias.gob.ec/portalscvs/index.htm"),
+        ("SENAE", "https://www.aduana.gob.ec/")
+    ]
+    resultados = [_ping_url(url, label) for label, url in fuentes]
+    return {
+        "resumen": {
+            "total": len(resultados),
+            "ok": sum(1 for r in resultados if r.get("ok")),
+            "fallidos": [r["fuente"] for r in resultados if not r.get("ok")]
+        },
+        "detalle": resultados
+    }
+
 @app.get("/check_fielweb_status")
 async def check_fielweb_status():
     """
