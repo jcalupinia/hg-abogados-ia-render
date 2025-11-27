@@ -201,6 +201,28 @@ async def check_external_sources(fuente: Optional[str] = None):
 async def check_external_source_single(fuente_id: str):
     """Alias para probar una sola fuente usando path param en lugar de query param."""
     return await check_external_sources(fuente=fuente_id)
+
+    """Alias para probar una sola fuente usando path param en lugar de query param."""
+    return await check_external_sources(fuente=fuente_id)
+
+@app.get("/check_corte_nacional_status")
+async def check_corte_nacional_status():
+    """Diagnóstico rápido de conectividad a los portales de la Corte Nacional (antiguo y nuevo)."""
+    urls = {
+        "corte_nacional_relatoria": os.getenv("CORTE_NACIONAL_URL", "https://portalcortej.justicia.gob.ec/FichaRelatoria"),
+        "corte_nacional_nuevo": os.getenv("CORTE_NACIONAL_NUEVO_URL", "https://busquedasentencias.cortenacional.gob.ec/")
+    }
+    detalle = []
+    for fid, url in urls.items():
+        detalle.append({"id": fid, **_ping_url(url, fid)})
+    return {
+        "resumen": {
+            "total": len(detalle),
+            "ok": sum(1 for r in detalle if r.get("ok")),
+            "fallidos": [r["fuente"] for r in detalle if not r.get("ok")]
+        },
+        "detalle": detalle
+    }
     
 @app.get("/check_fielweb_status")
 async def check_fielweb_status():
