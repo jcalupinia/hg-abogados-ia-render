@@ -5,6 +5,7 @@
 # ======================================================
 
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 import os, traceback, asyncio
 import requests
@@ -87,7 +88,7 @@ async def consult_fielweb_endpoint(payload: dict):
     if not consultar_fielweb:
         raise HTTPException(status_code=500, detail="Conector FielWeb no disponible.")
     try:
-        return consultar_fielweb(payload)
+        return await run_in_threadpool(consultar_fielweb, payload)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error FielWeb: {str(e)}")
@@ -100,7 +101,7 @@ async def consult_jurisprudencia_endpoint(payload: dict):
     if not consultar_jurisprudencia:
         raise HTTPException(status_code=500, detail="Conector de Jurisprudencia no disponible.")
     try:
-        return consultar_jurisprudencia(payload)
+        return await run_in_threadpool(consultar_jurisprudencia, payload)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error Jurisprudencia: {str(e)}")
@@ -133,8 +134,8 @@ async def consult_hybrid(payload: dict):
     tipo = payload.get("tipo_usuario", "")
 
     try:
-        resultado_fielweb = consultar_fielweb(payload) if consultar_fielweb else None
-        resultado_juris = consultar_jurisprudencia(payload) if consultar_jurisprudencia else None
+        resultado_fielweb = await run_in_threadpool(consultar_fielweb, payload) if consultar_fielweb else None
+        resultado_juris = await run_in_threadpool(consultar_jurisprudencia, payload) if consultar_jurisprudencia else None
 
         combinado = {
             "normativa_y_concordancias": resultado_fielweb.get("resultado") if resultado_fielweb else [],
