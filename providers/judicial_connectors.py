@@ -283,6 +283,21 @@ async def _buscar_juris_async(texto: str) -> Dict[str, Any]:
             debug_log("Cierre limpio del navegador Chromium completado.")
 
 # ================================
+# ⚙️ UTILIDAD DE EJECUCIÓN BLOQUEANTE
+# ================================
+def _run_async_blocking(coro):
+    """
+    Ejecuta la corrutina en un bucle nuevo y aislado para evitar conflictos con uvloop/nest_asyncio.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
+
+# ================================
 # 🧠 INTERFAZ PÚBLICA PARA FASTAPI
 # ================================
 def consultar_jurisprudencia(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -291,7 +306,7 @@ def consultar_jurisprudencia(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "Debe proporcionar un texto válido para búsqueda."}
 
     try:
-        return asyncio.run(_buscar_juris_async(texto))
+        return _run_async_blocking(_buscar_juris_async(texto))
     except PWTimeout as te:
         return {"error": f"Tiempo de espera agotado: {te}", "nivel_consulta": "Jurisprudencia"}
     except Exception as e:
