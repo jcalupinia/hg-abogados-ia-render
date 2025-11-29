@@ -66,10 +66,22 @@ def _proxy_config() -> Optional[dict]:
 # 🔧 SELECTORES ADAPTATIVOS
 # ================================
 LOGIN_SELECTORS = {
-    # Nuevos ids detectados en la pantalla actual de login (fielweb plus)
-    "user": ['#username-input', '#usuario', 'input[name="usuario"]', 'input[placeholder*="Usuario"]', 'input[id*="txtUsuario"]'],
-    "password": ['#password-input', '#clave', 'input[name="clave"]', 'input[placeholder*="Clave"]', 'input[id*="txtClave"]', 'input[type="password"]'],
-    "submit": ['#entrar-button', '#btnEntrar', 'button:has-text("Entrar")', 'input[value="Entrar"]', 'button[type="submit"]', '#ctl00_ContentPlaceHolder1_btnIngresar']
+    # Nuevos ids detectados en la pantalla actual de login (fielweb plus) y algunos comodines
+    "user": [
+        '#username-input', '#usuario',
+        'input[name="usuario"]', 'input[placeholder*="Usuario"]', 'input[id*="txtUsuario"]',
+        'input[name*="username"]', 'input[id*="username"]', 'input[id*="user"]'
+    ],
+    "password": [
+        '#password-input', '#clave',
+        'input[name="clave"]', 'input[placeholder*="Clave"]', 'input[id*="txtClave"]',
+        'input[type="password"]', 'input[name*="password"]', 'input[id*="password"]'
+    ],
+    "submit": [
+        '#entrar-button', '#btnEntrar',
+        'button:has-text("Entrar")', 'input[value="Entrar"]', 'button[type="submit"]',
+        '#ctl00_ContentPlaceHolder1_btnIngresar', 'button[id*="entrar"]'
+    ]
 }
 
 SEARCH_SELECTORS = {
@@ -95,7 +107,7 @@ async def _first_selector(page, selectors: List[str]) -> Optional[str]:
             continue
     return None
 
-async def _wait_first_selector(page, selectors: List[str], timeout_ms: int = NAV_TIMEOUT_MS) -> Optional[str]:
+async def _wait_first_selector(page, selectors: List[str], timeout_ms: int = 4000) -> Optional[str]:
     """
     Espera secuencialmente el primer selector disponible.
     Útil cuando el DOM tarda en construir los campos de login.
@@ -119,14 +131,27 @@ def _classify_link(texto: str) -> str:
 # ================================
 async def _login(page, url: str, user: str, password: str):
     debug_log(f"Iniciando sesión en {url}")
-    await page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+    resp = await page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+
+    # Si la respuesta es 4xx/5xx, devolvemos un error claro para evitar seguir esperando selectores
+    try:
+        status = resp.status if resp else None
+        if status and status >= 400:
+            raise RuntimeError(f"Login FielWeb devolvió HTTP {status} (posible bloqueo/captcha).")
+    except Exception:
+        pass
 
     user_sel = await _wait_first_selector(page, LOGIN_SELECTORS["user"])
     pass_sel = await _wait_first_selector(page, LOGIN_SELECTORS["password"])
     subm_sel = await _wait_first_selector(page, LOGIN_SELECTORS["submit"])
 
     if not all([user_sel, pass_sel, subm_sel]):
-        raise RuntimeError("Campos de login no encontrados (posible cambio en FielWeb).")
+        title = ""
+        try:
+            title = await page.title()
+        except Exception:
+            title = ""
+        raise RuntimeError(f"Campos de login no encontrados (posible cambio en FielWeb). URL={page.url} title='{title}'")
 
     await page.fill(user_sel, user)
     await page.fill(pass_sel, password)
