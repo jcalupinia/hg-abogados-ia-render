@@ -66,9 +66,10 @@ def _proxy_config() -> Optional[dict]:
 # 🔧 SELECTORES ADAPTATIVOS
 # ================================
 LOGIN_SELECTORS = {
-    "user": ['#usuario', 'input[name="usuario"]', 'input[placeholder*="Usuario"]', 'input[id*="txtUsuario"]'],
-    "password": ['#clave', 'input[name="clave"]', 'input[placeholder*="Clave"]', 'input[id*="txtClave"]', 'input[type="password"]'],
-    "submit": ['#btnEntrar', 'button:has-text("Entrar")', 'input[value="Entrar"]', 'button[type="submit"]', '#ctl00_ContentPlaceHolder1_btnIngresar']
+    # Nuevos ids detectados en la pantalla actual de login (fielweb plus)
+    "user": ['#username-input', '#usuario', 'input[name="usuario"]', 'input[placeholder*="Usuario"]', 'input[id*="txtUsuario"]'],
+    "password": ['#password-input', '#clave', 'input[name="clave"]', 'input[placeholder*="Clave"]', 'input[id*="txtClave"]', 'input[type="password"]'],
+    "submit": ['#entrar-button', '#btnEntrar', 'button:has-text("Entrar")', 'input[value="Entrar"]', 'button[type="submit"]', '#ctl00_ContentPlaceHolder1_btnIngresar']
 }
 
 SEARCH_SELECTORS = {
