@@ -95,6 +95,18 @@ async def _first_selector(page, selectors: List[str]) -> Optional[str]:
             continue
     return None
 
+async def _wait_first_selector(page, selectors: List[str], timeout_ms: int = NAV_TIMEOUT_MS) -> Optional[str]:
+    """
+    Espera secuencialmente el primer selector disponible.
+    Útil cuando el DOM tarda en construir los campos de login.
+    """
+    for sel in selectors:
+        try:
+            await page.wait_for_selector(sel, timeout=timeout_ms, state="visible")
+            return sel
+        except Exception:
+            continue
+    return None
 def _classify_link(texto: str) -> str:
     t = texto.lower()
     if any(k in t for k in DOWNLOAD_FILTERS): return "descarga"
@@ -109,9 +121,9 @@ async def _login(page, url: str, user: str, password: str):
     debug_log(f"Iniciando sesión en {url}")
     await page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
 
-    user_sel = await _first_selector(page, LOGIN_SELECTORS["user"])
-    pass_sel = await _first_selector(page, LOGIN_SELECTORS["password"])
-    subm_sel = await _first_selector(page, LOGIN_SELECTORS["submit"])
+    user_sel = await _wait_first_selector(page, LOGIN_SELECTORS["user"])
+    pass_sel = await _wait_first_selector(page, LOGIN_SELECTORS["password"])
+    subm_sel = await _wait_first_selector(page, LOGIN_SELECTORS["submit"])
 
     if not all([user_sel, pass_sel, subm_sel]):
         raise RuntimeError("Campos de login no encontrados (posible cambio en FielWeb).")
