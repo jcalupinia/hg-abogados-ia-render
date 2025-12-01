@@ -1,4 +1,4 @@
-import os
+aimport os
 import asyncio
 from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin
@@ -386,6 +386,63 @@ def _run_async_blocking(coro):
     finally:
         loop.close()
         asyncio.set_event_loop(None)
+
+# ================================
+# 🌐 INTERFACES INDIVIDUALES
+# ================================
+async def _buscar_fuente_individual(func, texto: str, fuente: str) -> Dict[str, Any]:
+    """
+    Reutiliza la lógica de navegación para una sola fuente (evita duplicar browsers).
+    """
+    launch_args = [
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-setuid-sandbox",
+        "--disable-web-security"
+    ]
+    proxy_cfg = _proxy_config()
+    resultados = []
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True, args=launch_args, proxy=proxy_cfg)
+        context = await browser.new_context()
+        page = await context.new_page()
+        page.set_default_timeout(PAGE_TIMEOUT_MS)
+        try:
+            res = await func(page, texto)
+            resultados.extend(res)
+            resultados = _dedup(resultados)
+            return {
+                "mensaje": f"Consulta completada para '{texto}'.",
+                "nivel_consulta": fuente,
+                "resultado": resultados[:MAX_ITEMS]
+            }
+        finally:
+            await context.close()
+            await browser.close()
+            debug_log("Cierre limpio del navegador Chromium (individual) completado.")
+
+def consultar_corte_nacional(payload: Dict[str, Any]) -> Dict[str, Any]:
+    texto = (payload.get("texto") or payload.get("palabras_clave") or "").strip()
+    if not texto:
+        return {"error": "Debe proporcionar un texto válido para búsqueda.", "nivel_consulta": "Corte Nacional"}
+    try:
+        return _run_async_blocking(_buscar_fuente_individual(_buscar_corte_nacional, texto, "Corte Nacional"))
+    except PWTimeout as te:
+        return {"error": f"Tiempo de espera agotado: {te}", "nivel_consulta": "Corte Nacional"}
+    except Exception as e:
+        return {"error": f"Error general al consultar Corte Nacional: {e}", "nivel_consulta": "Corte Nacional"}
+
+def consultar_procesos_judiciales(payload: Dict[str, Any]) -> Dict[str, Any]:
+    texto = (payload.get("texto") or payload.get("palabras_clave") or "").strip()
+    if not texto:
+        return {"error": "Debe proporcionar un texto válido para búsqueda.", "nivel_consulta": "Procesos Judiciales"}
+    try:
+        return _run_async_blocking(_buscar_fuente_individual(_buscar_procesos_judiciales, texto, "Procesos Judiciales"))
+    except PWTimeout as te:
+        return {"error": f"Tiempo de espera agotado: {te}", "nivel_consulta": "Procesos Judiciales"}
+    except Exception as e:
+        return {"error": f"Error general al consultar Procesos Judiciales: {e}", "nivel_consulta": "Procesos Judiciales"}
 
 # ================================
 # 🧠 INTERFAZ PÚBLICA PARA FASTAPI
