@@ -115,13 +115,15 @@ async def _click_recaptcha_checkbox(page) -> bool:
         frame = await iframe.content_frame()
         if not frame:
             return False
+        debug_log("Intentando click en checkbox reCAPTCHA...")
         await frame.click("div.recaptcha-checkbox-border, span.recaptcha-checkbox", timeout=4000)
         try:
             await frame.wait_for_selector(
                 "div.recaptcha-checkbox-checked, span[aria-checked='true']", timeout=3000
             )
+            debug_log("reCAPTCHA marcado (checkbox en estado checked).")
         except Exception:
-            pass
+            debug_log("No se detectó estado 'checked' en reCAPTCHA (puede requerir reto adicional).")
         await page.wait_for_timeout(1200)
         return True
     except Exception:
@@ -282,9 +284,11 @@ async def _buscar_procesos_judiciales(page, texto: str) -> List[Dict[str, Any]]:
     await page.fill(q_sel, texto[:80])
     captcha_clicked = await _click_recaptcha_checkbox(page)
     if b_sel:
+        debug_log("Procesos Judiciales: click primer Buscar.")
         await page.click(b_sel)
         if captcha_clicked:
             await page.wait_for_timeout(800)
+            debug_log("Procesos Judiciales: click segundo Buscar (post-captcha).")
             await page.click(b_sel)
     else:
         await page.press(q_sel, "Enter")
