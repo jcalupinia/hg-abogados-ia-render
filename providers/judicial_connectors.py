@@ -245,15 +245,21 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
             debug_log("Corte Nacional: sin nodos de resultado y no se pudo leer body.")
     for card in cards:
         try:
-            anchor = await card.query_selector('a[href*="Proceso"], a[href*="proceso"], a[href*=".pdf"], a')
+            anchor = await card.query_selector('a[href*="Proceso"], a[href*="proceso"], strong.text-truncate, a')
             href = await anchor.get_attribute("href") if anchor else None
             titulo = (await anchor.inner_text()) if anchor else ""
             descripcion = await _safe_inner_text(card, "")
-            if not (href or descripcion):
-                continue
 
-            pdf_link = await card.query_selector('a[href$=".pdf"], a[href*=".pdf"]')
+            pdf_link = await card.query_selector('a[href$=".pdf"], a[href*=".pdf"], img[src*="pdf"], img[alt*="pdf"]')
             pdf_href = await pdf_link.get_attribute("href") if pdf_link else None
+            if not pdf_href and pdf_link:
+                # Si es un <img> sin href, busca el href del ancestro más cercano
+                try:
+                    parent_a = await pdf_link.evaluate_handle("el => el.closest('a')")
+                    if parent_a:
+                        pdf_href = await parent_a.get_attribute("href")
+                except Exception:
+                    pdf_href = None
 
             resultados.append({
                 "fuente": "Corte Nacional de Justicia (nuevo)",
