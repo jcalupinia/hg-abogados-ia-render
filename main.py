@@ -30,7 +30,11 @@ except Exception as e:
 # ============================================
 try:
     from providers.fielweb_connector import consultar_fielweb
-    from providers.judicial_connectors import consultar_jurisprudencia
+    from providers.judicial_connectors import (
+        consultar_jurisprudencia,
+        consultar_corte_nacional,
+        consultar_procesos_judiciales,
+    )
     from providers.uafe_connector import consultar_uafe
     print("✅ Conectores cargados correctamente.")
 except ModuleNotFoundError as e:
@@ -105,6 +109,32 @@ async def consult_jurisprudencia_endpoint(payload: dict):
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error Jurisprudencia: {str(e)}")
+
+# ============================================
+# 🔎 Consulta individual Corte Nacional (nuevo buscador)
+# ============================================
+@app.post("/consult_corte_nacional")
+async def consult_corte_nacional_endpoint(payload: dict):
+    if not consultar_corte_nacional:
+        raise HTTPException(status_code=500, detail="Conector Corte Nacional no disponible.")
+    try:
+        return await run_in_threadpool(consultar_corte_nacional, payload)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error Corte Nacional: {str(e)}")
+
+# ============================================
+# 🔎 Consulta individual Procesos Judiciales (E-SATJE)
+# ============================================
+@app.post("/consult_procesos_judiciales")
+async def consult_procesos_judiciales_endpoint(payload: dict):
+    if not consultar_procesos_judiciales:
+        raise HTTPException(status_code=500, detail="Conector Procesos Judiciales no disponible.")
+    try:
+        return await run_in_threadpool(consultar_procesos_judiciales, payload)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error Procesos Judiciales: {str(e)}")
 
 # ============================================
 # 🔎 Consulta UAFE (sujetos obligados)
