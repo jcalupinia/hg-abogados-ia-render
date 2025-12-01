@@ -208,13 +208,24 @@ async def _buscar_corte_constitucional(page, texto: str) -> List[Dict[str, Any]]
                 })
     return _dedup(resultados)
 
-async def _buscar_corte_nacional(page, texto: str) -> List[Dict[str, Any]]:
+def _tipo_busqueda_corte_nacional(payload: Dict[str, Any]) -> str:
+    """
+    Determina el modo de búsqueda: aproximada (default) o por número de proceso.
+    """
+    modo = (payload.get("tipo_busqueda") or payload.get("modo") or "").lower()
+    if "proceso" in modo:
+        return "numeroProceso"
+    return "aproximada"
+
+
+async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Corte Nacional - buscador nuevo (busquedasentencias.cortenacional.gob.ec)"""
     debug_log(f"Consultando Corte Nacional (nuevo) con: {texto}")
     resultados = []
     base = URLS["corte_nacional"].rstrip("/")
     query = quote(texto[:50])
-    resultados_url = f"{base}/resultados?query={query}&tipoBusqueda=aproximada"
+    tipo_busqueda = _tipo_busqueda_corte_nacional(payload or {})
+    resultados_url = f"{base}/resultados?query={query}&tipoBusqueda={tipo_busqueda}"
     debug_log(f"Corte Nacional: navegando directo a resultados {resultados_url}")
     await page.goto(resultados_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
     try:
@@ -313,7 +324,7 @@ async def _buscar_procesos_judiciales(page, texto: str) -> List[Dict[str, Any]]:
 # ================================
 # 🚀 FUNCIÓN ASÍNCRONA PRINCIPAL
 # ================================
-async def _buscar_juris_async(texto: str) -> Dict[str, Any]:
+async def _buscar_juris_async(texto: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if not texto:
         return {"error": "Debe ingresar un texto de búsqueda."}
 
@@ -341,7 +352,7 @@ async def _buscar_juris_async(texto: str) -> Dict[str, Any]:
             for fuente, funcion in [
                 ("SATJE", _buscar_satje),
                 ("Corte Constitucional", _buscar_corte_constitucional),
-                ("Corte Nacional de Justicia", _buscar_corte_nacional),
+                ("Corte Nacional de Justicia", lambda p, t=texto: _buscar_corte_nacional(p, t, payload)),
                 ("Procesos Judiciales", _buscar_procesos_judiciales),
             ]:
                 try:
@@ -420,7 +431,7 @@ def consultar_corte_nacional(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not texto:
         return {"error": "Debe proporcionar un texto válido para búsqueda.", "nivel_consulta": "Corte Nacional"}
     try:
-        return _run_async_blocking(_buscar_fuente_individual(_buscar_corte_nacional, texto, "Corte Nacional"))
+        return _run_async_blocking(_buscar_fuente_individual(lambda p, t=texto: _buscar_corte_nacional(p, t, payload), texto, "Corte Nacional"))
     except PWTimeout as te:
         return {"error": f"Tiempo de espera agotado: {te}", "nivel_consulta": "Corte Nacional"}
     except Exception as e:
@@ -446,7 +457,7 @@ def consultar_jurisprudencia(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "Debe proporcionar un texto válido para búsqueda."}
 
     try:
-        return _run_async_blocking(_buscar_juris_async(texto))
+        return _run_async_blocking(_buscar_juris_async(texto, payload))
     except PWTimeout as te:
         return {"error": f"Tiempo de espera agotado: {te}", "nivel_consulta": "Jurisprudencia"}
     except Exception as e:
