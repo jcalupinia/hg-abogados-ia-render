@@ -213,6 +213,8 @@ def _tipo_busqueda_corte_nacional(payload: Dict[str, Any]) -> str:
     Determina el modo de búsqueda: aproximada (default) o por número de proceso.
     """
     modo = (payload.get("tipo_busqueda") or payload.get("modo") or "").lower()
+    if "exact" in modo or "frase" in modo:
+        return "exacta"
     if "proceso" in modo:
         return "numeroProceso"
     return "aproximada"
