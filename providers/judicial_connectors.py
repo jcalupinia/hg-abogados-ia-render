@@ -217,16 +217,35 @@ async def _buscar_corte_nacional(page, texto: str) -> List[Dict[str, Any]]:
     q_sel = await _first_selector(page, [
         'input[placeholder*="Digite"]',
         'input[placeholder*="Buscar"]',
+        'input[placeholder*="palabra"]',
+        'input[aria-label*="Buscar"]',
+        'input[formcontrolname="searchText"]',
+        'input[type="search"]',
         'input[type="text"]'
     ])
-    b_sel = await _first_selector(page, ['button:has-text("Buscar")', 'button[type="submit"]'])
+    b_sel = await _first_selector(page, [
+        'button:has-text("Buscar")',
+        'button[type="submit"]',
+        'button[aria-label*="Buscar"]',
+        'button.mat-mdc-unelevated-button'
+    ])
     if not q_sel or not b_sel:
+        debug_log("Corte Nacional: no se encontraron controles de búsqueda.")
         return []
+
+    # Asegura que la opción "Por palabra/s aproximada/s" esté seleccionada (si existe)
+    try:
+        radio = await _first_selector(page, ['input[type="radio"]'])
+        if radio:
+            await page.check(radio)
+    except Exception:
+        pass
 
     await page.fill(q_sel, texto[:50])
     await page.click(b_sel)
     try:
         await page.wait_for_load_state("networkidle", timeout=NAV_TIMEOUT_MS)
+        await page.wait_for_selector("a[href*='Proceso'], a[href*='proceso'], a[href*='.pdf'], .card, article, app-resultado, div.result-card", timeout=8000)
     except PWTimeout:
         await page.wait_for_timeout(1500)
 
