@@ -259,7 +259,8 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
                 "fuente": "Corte Nacional de Justicia (nuevo)",
                 "titulo": (titulo or descripcion.split("\n")[0] if descripcion else "Sentencia Corte Nacional").strip()[:180],
                 "descripcion": descripcion.split("\n")[0][:200],
-                "url": _abs_url(page.url, pdf_href or href or page.url)
+                "url": _abs_url(page.url, pdf_href or href or page.url),
+                "pdf_url": _abs_url(page.url, pdf_href) if pdf_href else None
             })
         except Exception:
             continue
