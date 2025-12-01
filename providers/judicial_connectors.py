@@ -274,9 +274,12 @@ async def _buscar_procesos_judiciales(page, texto: str) -> List[Dict[str, Any]]:
         return []
 
     await page.fill(q_sel, texto[:80])
-    await _click_recaptcha_checkbox(page)
+    captcha_clicked = await _click_recaptcha_checkbox(page)
     if b_sel:
         await page.click(b_sel)
+        if captcha_clicked:
+            await page.wait_for_timeout(600)
+            await page.click(b_sel)
     else:
         await page.press(q_sel, "Enter")
 
