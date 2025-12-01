@@ -39,6 +39,7 @@ URLS = {
     "corte_constitucional": os.getenv("CORTE_CONSTITUCIONAL_URL", "http://buscador.corteconstitucional.gob.ec/buscador-externo/principal").strip(),
     # Se utiliza el buscador nuevo como URL principal de la Corte Nacional
     "corte_nacional": os.getenv("CORTE_NACIONAL_URL", "https://busquedasentencias.cortenacional.gob.ec/").strip(),
+    "procesos_judiciales": os.getenv("PROCESOS_JUDICIALES_URL", "https://procesosjudiciales.funcionjudicial.gob.ec/busqueda").strip(),
 }
 
 PAGE_TIMEOUT_MS = 30_000
@@ -98,6 +99,27 @@ def _dedup(items: List[Dict[str, Any]], key: str = "url") -> List[Dict[str, Any]
             seen.add(val)
             out.append(i)
     return out
+
+async def _click_recaptcha_checkbox(page) -> bool:
+    """
+    Intenta clicar el checkbox de reCAPTCHA si está presente (no resuelve retos avanzados).
+    """
+    try:
+        iframe = await page.wait_for_selector(
+            "iframe[src*='recaptcha'], iframe[title*='reCAPTCHA']", timeout=5000
+        )
+    except Exception:
+        return False
+
+    try:
+        frame = await iframe.content_frame()
+        if not frame:
+            return False
+        await frame.click("div.recaptcha-checkbox-border", timeout=4000)
+        await page.wait_for_timeout(1500)
+        return True
+    except Exception:
+        return False
 
 # ================================
 # 🔎 FUNCIONES DE BÚSQUEDA
@@ -228,6 +250,60 @@ async def _buscar_corte_nacional(page, texto: str) -> List[Dict[str, Any]]:
             continue
     return _dedup(resultados)
 
+
+async def _buscar_procesos_judiciales(page, texto: str) -> List[Dict[str, Any]]:
+    """Buscador E-SATJE Procesos Judiciales (procesosjudiciales.funcionjudicial.gob.ec/busqueda)"""
+    debug_log(f"Consultando Procesos Judiciales con: {texto}")
+    resultados = []
+    await page.goto(URLS["procesos_judiciales"], wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+
+    q_sel = await _first_selector(page, [
+        'input[placeholder*="palabras"]',
+        'input[placeholder*="Buscar"]',
+        'input[id*="form-search"]',
+        'input[type="text"]'
+    ])
+    b_sel = await _first_selector(page, [
+        'button[aria-label*="buscar"]',
+        'button:has-text("Buscar")',
+        'button[type="submit"]',
+        'button.mat-primary',
+        'button[aria-label*="Buscar"]'
+    ])
+    if not q_sel:
+        return []
+
+    await page.fill(q_sel, texto[:80])
+    await _click_recaptcha_checkbox(page)
+    if b_sel:
+        await page.click(b_sel)
+    else:
+        await page.press(q_sel, "Enter")
+
+    try:
+        await page.wait_for_load_state("networkidle", timeout=NAV_TIMEOUT_MS)
+    except PWTimeout:
+        await page.wait_for_timeout(1500)
+
+    # Los resultados suelen estar en tarjetas/enlaces; recolectamos anclas visibles
+    nodes = await page.query_selector_all("a, .card, .resultado, tr")
+    for n in nodes[:MAX_ITEMS]:
+        try:
+            anchor = await n.query_selector("a") if (await n.query_selector("a")) else n
+            href = await anchor.get_attribute("href") if anchor else None
+            txt = await _safe_inner_text(n)
+            if not txt and not href:
+                continue
+            resultados.append({
+                "fuente": "Procesos Judiciales",
+                "titulo": (txt.split("\n")[0] if txt else "Proceso judicial").strip()[:180],
+                "descripcion": txt[:200],
+                "url": _abs_url(page.url, href) if href else page.url
+            })
+        except Exception:
+            continue
+    return _dedup(resultados)
+
 # ================================
 # 🚀 FUNCIÓN ASÍNCRONA PRINCIPAL
 # ================================
@@ -260,6 +336,7 @@ async def _buscar_juris_async(texto: str) -> Dict[str, Any]:
                 ("SATJE", _buscar_satje),
                 ("Corte Constitucional", _buscar_corte_constitucional),
                 ("Corte Nacional de Justicia", _buscar_corte_nacional),
+                ("Procesos Judiciales", _buscar_procesos_judiciales),
             ]:
                 try:
                     res = await funcion(page, texto)
