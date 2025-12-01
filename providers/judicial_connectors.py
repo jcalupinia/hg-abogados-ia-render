@@ -115,8 +115,14 @@ async def _click_recaptcha_checkbox(page) -> bool:
         frame = await iframe.content_frame()
         if not frame:
             return False
-        await frame.click("div.recaptcha-checkbox-border", timeout=4000)
-        await page.wait_for_timeout(1500)
+        await frame.click("div.recaptcha-checkbox-border, span.recaptcha-checkbox", timeout=4000)
+        try:
+            await frame.wait_for_selector(
+                "div.recaptcha-checkbox-checked, span[aria-checked='true']", timeout=3000
+            )
+        except Exception:
+            pass
+        await page.wait_for_timeout(1200)
         return True
     except Exception:
         return False
@@ -278,7 +284,7 @@ async def _buscar_procesos_judiciales(page, texto: str) -> List[Dict[str, Any]]:
     if b_sel:
         await page.click(b_sel)
         if captcha_clicked:
-            await page.wait_for_timeout(600)
+            await page.wait_for_timeout(800)
             await page.click(b_sel)
     else:
         await page.press(q_sel, "Enter")
