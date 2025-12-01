@@ -234,29 +234,30 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
     except PWTimeout:
         await page.wait_for_timeout(1500)
 
-    cards = await page.query_selector_all("app-resultado, .card, article, li, div.result-card")
+    cards = await page.query_selector_all("app-resultado, .card, article, li, div.result-card, mat-card, div[role='listitem']")
+    if not cards:
+        try:
+            body_txt = (await page.inner_text("body"))[:300]
+            debug_log(f"Corte Nacional: sin nodos de resultado, body preview: {body_txt}")
+        except Exception:
+            debug_log("Corte Nacional: sin nodos de resultado y no se pudo leer body.")
     for card in cards:
         try:
             anchor = await card.query_selector('a[href*="Proceso"], a[href*="proceso"], a[href*=".pdf"], a')
-            if not anchor:
-                continue
-            href = await anchor.get_attribute("href")
-            if not href:
-                continue
-            titulo = (await anchor.inner_text()) or ""
+            href = await anchor.get_attribute("href") if anchor else None
+            titulo = (await anchor.inner_text()) if anchor else ""
             descripcion = await _safe_inner_text(card, "")
+            if not (href or descripcion):
+                continue
 
             pdf_link = await card.query_selector('a[href$=".pdf"], a[href*=".pdf"]')
-            if pdf_link:
-                pdf_href = await pdf_link.get_attribute("href")
-            else:
-                pdf_href = None
+            pdf_href = await pdf_link.get_attribute("href") if pdf_link else None
 
             resultados.append({
                 "fuente": "Corte Nacional de Justicia (nuevo)",
-                "titulo": titulo.strip()[:180] or "Sentencia Corte Nacional",
+                "titulo": (titulo or descripcion.split("\n")[0] if descripcion else "Sentencia Corte Nacional").strip()[:180],
                 "descripcion": descripcion.split("\n")[0][:200],
-                "url": _abs_url(page.url, pdf_href or href)
+                "url": _abs_url(page.url, pdf_href or href or page.url)
             })
         except Exception:
             continue
