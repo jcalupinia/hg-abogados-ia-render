@@ -1,7 +1,7 @@
 import os
 import asyncio
 from typing import List, Dict, Any, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, quote
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
 # ================================
@@ -212,44 +212,18 @@ async def _buscar_corte_nacional(page, texto: str) -> List[Dict[str, Any]]:
     """Corte Nacional - buscador nuevo (busquedasentencias.cortenacional.gob.ec)"""
     debug_log(f"Consultando Corte Nacional (nuevo) con: {texto}")
     resultados = []
-    await page.goto(URLS["corte_nacional"], wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
-
-    q_sel = await _first_selector(page, [
-        'input[placeholder*="Digite"]',
-        'input[placeholder*="Buscar"]',
-        'input[placeholder*="palabra"]',
-        'input[aria-label*="Buscar"]',
-        'input[formcontrolname="searchText"]',
-        'input[type="search"]',
-        'input[type="text"]'
-    ])
-    b_sel = await _first_selector(page, [
-        'button:has-text("Buscar")',
-        'button[type="submit"]',
-        'button[aria-label*="Buscar"]',
-        'button.mat-mdc-unelevated-button'
-    ])
-    if not q_sel or not b_sel:
-        debug_log("Corte Nacional: no se encontraron controles de búsqueda.")
-        return []
-
-    # Asegura que la opción "Por palabra/s aproximada/s" esté seleccionada (si existe)
-    try:
-        radio = await _first_selector(page, ['input[type="radio"]'])
-        if radio:
-            await page.check(radio)
-    except Exception:
-        pass
-
-    await page.fill(q_sel, texto[:50])
-    await page.click(b_sel)
+    base = URLS["corte_nacional"].rstrip("/")
+    query = quote(texto[:50])
+    resultados_url = f"{base}/resultados?query={query}&tipoBusqueda=aproximada"
+    debug_log(f"Corte Nacional: navegando directo a resultados {resultados_url}")
+    await page.goto(resultados_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
     try:
         await page.wait_for_load_state("networkidle", timeout=NAV_TIMEOUT_MS)
-        await page.wait_for_selector("a[href*='Proceso'], a[href*='proceso'], a[href*='.pdf'], .card, article, app-resultado, div.result-card", timeout=8000)
+        await page.wait_for_selector("app-resultado, a[href*='Proceso'], a[href*='proceso'], a[href*='.pdf'], .card, article, div.result-card", timeout=8000)
     except PWTimeout:
         await page.wait_for_timeout(1500)
 
-    cards = await page.query_selector_all("div, article, li")
+    cards = await page.query_selector_all("app-resultado, .card, article, li, div.result-card")
     for card in cards:
         try:
             anchor = await card.query_selector('a[href*="Proceso"], a[href*="proceso"], a[href*=".pdf"], a')
