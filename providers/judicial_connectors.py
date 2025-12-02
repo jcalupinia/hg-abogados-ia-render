@@ -246,9 +246,9 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
     try:
         raw_cards = await page.evaluate("""
         () => {
-            const cards = Array.from(document.querySelectorAll("app-resultado"));
+            const cards = Array.from(document.querySelectorAll(".resultado-item.card"));
             if (!cards.length) {
-                // fallback a otras tarjetas
+                // fallback a otras tarjetas genéricas
                 return Array.from(document.querySelectorAll(".card.shadow-sm, .result-card, mat-card, div[role='listitem']")).map(c=>({cardHTML:c.innerHTML}));
             }
             return cards.map(card => {
