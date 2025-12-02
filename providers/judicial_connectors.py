@@ -295,13 +295,37 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
             debug_log("Corte Nacional: sin nodos de resultado y no se pudo leer body.")
 
     for rc in raw_cards:
-        numero_proceso = rc.get("numero", "")
+        numero_proceso = rc.get("numero", "") or ""
         href = rc.get("href") or ""
         descripcion = rc.get("descripcion") or ""
         pdf_href = rc.get("pdfHref") or ""
         juez = rc.get("juez") or ""
         sala = rc.get("sala") or ""
         fecha = rc.get("fecha") or ""
+
+        # Fallbacks por regex sobre la descripción
+        import re
+        if not numero_proceso:
+            m = re.search(r"Nro\\s*Proceso\\s*([0-9]+)", descripcion, re.IGNORECASE)
+            if m:
+                numero_proceso = m.group(1)
+            else:
+                m2 = re.search(r"(\\d{7,})", descripcion)
+                if m2:
+                    numero_proceso = m2.group(1)
+
+        if not juez:
+            m = re.search(r"Juez/a:\\s*([^\\n]+)", descripcion, re.IGNORECASE)
+            if m:
+                juez = m.group(1).strip()
+        if not sala:
+            m = re.search(r"Sala:\\s*([^\\n]+)", descripcion, re.IGNORECASE)
+            if m:
+                sala = m.group(1).strip()
+        if not fecha:
+            m = re.search(r"(\\d{1,2}\\s+de\\s+\\w+\\s+de\\s+\\d{4})", descripcion, re.IGNORECASE)
+            if m:
+                fecha = m.group(1).strip()
 
         resultados.append({
             "fuente": "Corte Nacional de Justicia (nuevo)",
