@@ -247,7 +247,7 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
         try:
             anchor = await card.query_selector('a[href*="Proceso"], a[href*="proceso"], strong.text-truncate, a')
             href = await anchor.get_attribute("href") if anchor else None
-            titulo = (await anchor.inner_text()) if anchor else ""
+            numero_proceso = (await anchor.inner_text()) if anchor else ""
             descripcion = await _safe_inner_text(card, "")
 
             pdf_link = await card.query_selector('a[href$=".pdf"], a[href*=".pdf"], img[src*="pdf"], img[alt*="pdf"]')
@@ -261,12 +261,26 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
                 except Exception:
                     pdf_href = None
 
+            # Extraer juez, sala y fecha si existen
+            juez_el = await card.query_selector("a[href*='JUEZ'], a[href*='Juez'], a[href*='juez'], a[title*='Juez']")
+            juez = await _safe_inner_text(juez_el, "") if juez_el else ""
+
+            sala_el = await card.query_selector("xpath=.//*[contains(normalize-space(), 'Sala')]")
+            sala = await _safe_inner_text(sala_el, "") if sala_el else ""
+
+            fecha_el = await card.query_selector("div.text-end, span.text-end, div[align='right']")
+            fecha = await _safe_inner_text(fecha_el, "") if fecha_el else ""
+
             resultados.append({
                 "fuente": "Corte Nacional de Justicia (nuevo)",
-                "titulo": (titulo or descripcion.split("\n")[0] if descripcion else "Sentencia Corte Nacional").strip()[:180],
+                "titulo": (numero_proceso or descripcion.split("\n")[0] if descripcion else "Sentencia Corte Nacional").strip()[:180],
                 "descripcion": descripcion.split("\n")[0][:200],
                 "url": _abs_url(page.url, pdf_href or href or page.url),
-                "pdf_url": _abs_url(page.url, pdf_href) if pdf_href else None
+                "pdf_url": _abs_url(page.url, pdf_href) if pdf_href else None,
+                "numero_proceso": numero_proceso.strip(),
+                "juez": juez.strip(),
+                "sala": sala.strip(),
+                "fecha": fecha.strip()
             })
         except Exception:
             continue
