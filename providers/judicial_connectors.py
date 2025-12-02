@@ -283,16 +283,16 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
                 const descNode = q("p");
                 const descripcion = descNode ? (descNode.textContent || "").trim() : inner.trim();
 
-                return {
-                    numero,
-                    href,
-                    pdfHref,
-                    juez: juezMatch ? juezMatch[1].trim() : "",
-                    sala: salaMatch ? salaMatch[1].trim() : "",
-                    fecha: fechaMatch ? fechaMatch[0].trim() : "",
-                    descripcion
-                };
-            });
+            return {
+                numero,
+                href,
+                pdfHref,
+                juez: juezMatch ? juezMatch[1].trim() : qt("span.text-secondary.text-truncate"),
+                sala: salaMatch ? salaMatch[1].trim() : (qt("span.text-secondary.text-wrap") || ""),
+                fecha: fechaMatch ? fechaMatch[0].trim() : "",
+                descripcion
+            };
+        });
         }
         """)
     except Exception:
