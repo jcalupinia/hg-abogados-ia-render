@@ -242,54 +242,78 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
     except PWTimeout:
         await page.wait_for_timeout(1500)
 
-    cards = await page.query_selector_all("app-resultado, .card, article, li, div.result-card, mat-card, div[role='listitem']")
-    if not cards:
+    # Extraer datos en el contexto de la página para capturar campos (proceso, juez, sala, fecha, pdf)
+    try:
+        raw_cards = await page.evaluate("""
+        () => {
+            const cards = Array.from(document.querySelectorAll("app-resultado, .card, article, li, div.result-card, mat-card, div[role='listitem']"));
+            return cards.map(card => {
+                const anchor = card.querySelector("a[href*='Proceso'], a[href*='proceso'], strong.text-truncate, a");
+                const num = anchor ? (anchor.textContent || "").trim() : "";
+                const href = anchor && anchor.href ? anchor.href : "";
+
+                let pdfHref = "";
+                let pdfEl = card.querySelector("a[href$='.pdf'], a[href*='.pdf']");
+                if (!pdfEl) {
+                    const img = card.querySelector("img[src*='pdf'], img[alt*='pdf']");
+                    if (img) {
+                        const a = img.closest("a");
+                        if (a && a.href) pdfHref = a.href;
+                    }
+                } else {
+                    pdfHref = pdfEl.href || "";
+                }
+
+                const juezEl = Array.from(card.querySelectorAll("a")).find(a => (a.textContent || '').toLowerCase().includes("juez"));
+                const salaEl = Array.from(card.querySelectorAll("*")).find(el => (el.textContent || "").trim().startsWith("Sala"));
+                const fechaEl = card.querySelector("div.text-end, span.text-end, div[align='right']") ||
+                                Array.from(card.querySelectorAll("div, span")).find(el => /\\d{1,2}\\s+de\\s+\\w+\\s+de\\s+\\d{4}/i.test(el.textContent || ""));
+
+                const descripcionEl = card.querySelector("p") || card;
+                const descripcion = (descripcionEl.textContent || "").trim();
+
+                return {
+                    numero: num,
+                    href,
+                    pdfHref,
+                    juez: juezEl ? (juezEl.textContent || "").trim() : "",
+                    sala: salaEl ? (salaEl.textContent || "").trim() : "",
+                    fecha: fechaEl ? (fechaEl.textContent || "").trim() : "",
+                    descripcion
+                };
+            });
+        }
+        """)
+    except Exception:
+        raw_cards = []
+
+    if not raw_cards:
         try:
-            body_txt = (await page.inner_text("body"))[:300]
+            body_txt = (await page.inner_text("body"))[:400]
             debug_log(f"Corte Nacional: sin nodos de resultado, body preview: {body_txt}")
         except Exception:
             debug_log("Corte Nacional: sin nodos de resultado y no se pudo leer body.")
-    for card in cards:
-        try:
-            anchor = await card.query_selector('a[href*="Proceso"], a[href*="proceso"], strong.text-truncate, a')
-            href = await anchor.get_attribute("href") if anchor else None
-            numero_proceso = (await anchor.inner_text()) if anchor else ""
-            descripcion = await _safe_inner_text(card, "")
 
-            pdf_link = await card.query_selector('a[href$=".pdf"], a[href*=".pdf"], img[src*="pdf"], img[alt*="pdf"]')
-            pdf_href = await pdf_link.get_attribute("href") if pdf_link else None
-            if not pdf_href and pdf_link:
-                # Si es un <img> sin href, busca el href del ancestro más cercano
-                try:
-                    parent_a = await pdf_link.evaluate_handle("el => el.closest('a')")
-                    if parent_a:
-                        pdf_href = await parent_a.get_attribute("href")
-                except Exception:
-                    pdf_href = None
+    for rc in raw_cards:
+        numero_proceso = rc.get("numero", "")
+        href = rc.get("href") or ""
+        descripcion = rc.get("descripcion") or ""
+        pdf_href = rc.get("pdfHref") or ""
+        juez = rc.get("juez") or ""
+        sala = rc.get("sala") or ""
+        fecha = rc.get("fecha") or ""
 
-            # Extraer juez, sala y fecha si existen
-            juez_el = await card.query_selector("a[href*='JUEZ'], a[href*='Juez'], a[href*='juez'], a[title*='Juez']")
-            juez = await _safe_inner_text(juez_el, "") if juez_el else ""
-
-            sala_el = await card.query_selector("xpath=.//*[contains(normalize-space(), 'Sala')]")
-            sala = await _safe_inner_text(sala_el, "") if sala_el else ""
-
-            fecha_el = await card.query_selector("div.text-end, span.text-end, div[align='right']")
-            fecha = await _safe_inner_text(fecha_el, "") if fecha_el else ""
-
-            resultados.append({
-                "fuente": "Corte Nacional de Justicia (nuevo)",
-                "titulo": (numero_proceso or descripcion.split("\n")[0] if descripcion else "Sentencia Corte Nacional").strip()[:180],
-                "descripcion": descripcion.split("\n")[0][:200],
-                "url": _abs_url(page.url, pdf_href or href or page.url),
-                "pdf_url": _abs_url(page.url, pdf_href) if pdf_href else None,
-                "numero_proceso": numero_proceso.strip(),
-                "juez": juez.strip(),
-                "sala": sala.strip(),
-                "fecha": fecha.strip()
-            })
-        except Exception:
-            continue
+        resultados.append({
+            "fuente": "Corte Nacional de Justicia (nuevo)",
+            "titulo": (numero_proceso or descripcion.split("\n")[0] if descripcion else "Sentencia Corte Nacional").strip()[:180],
+            "descripcion": descripcion.split("\n")[0][:400],
+            "url": _abs_url(page.url, pdf_href or href or page.url),
+            "pdf_url": _abs_url(page.url, pdf_href) if pdf_href else None,
+            "numero_proceso": numero_proceso.strip(),
+            "juez": juez.strip(),
+            "sala": sala.strip(),
+            "fecha": fecha.strip()
+        })
     return _dedup(resultados)
 
 
