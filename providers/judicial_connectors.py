@@ -246,39 +246,50 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
     try:
         raw_cards = await page.evaluate("""
         () => {
-            const cards = Array.from(document.querySelectorAll("app-resultado, .card, article, li, div.result-card, mat-card, div[role='listitem']"));
+            const cards = Array.from(document.querySelectorAll("app-resultado"));
+            if (!cards.length) {
+                // fallback a otras tarjetas
+                return Array.from(document.querySelectorAll(".card.shadow-sm, .result-card, mat-card, div[role='listitem']")).map(c=>({cardHTML:c.innerHTML}));
+            }
             return cards.map(card => {
-                const anchor = card.querySelector("a[href*='Proceso'], a[href*='proceso'], strong.text-truncate, a");
-                const num = anchor ? (anchor.textContent || "").trim() : "";
-                const href = anchor && anchor.href ? anchor.href : "";
+                const q = (sel) => card.querySelector(sel);
+                const qt = (sel) => {
+                    const el = q(sel);
+                    return el ? (el.textContent || "").trim() : "";
+                };
+                const qa = (sel) => {
+                    const el = q(sel);
+                    if (!el) return "";
+                    return el.href || el.getAttribute("href") || "";
+                };
 
-                let pdfHref = "";
-                let pdfEl = card.querySelector("a[href$='.pdf'], a[href*='.pdf']");
-                if (!pdfEl) {
-                    const img = card.querySelector("img[src*='pdf'], img[alt*='pdf']");
+                const numero = qt("strong.text-truncate, a[href*='Proceso'], a[href*='proceso']");
+                const href = qa("a[href*='Proceso'], a[href*='proceso']");
+
+                let pdfHref = qa("a[href$='.pdf'], a[href*='.pdf']");
+                if (!pdfHref) {
+                    const img = q("img[src*='pdf'], img[alt*='pdf']");
                     if (img) {
                         const a = img.closest("a");
-                        if (a && a.href) pdfHref = a.href;
+                        if (a) pdfHref = a.href || a.getAttribute("href") || "";
                     }
-                } else {
-                    pdfHref = pdfEl.href || "";
                 }
 
-                const juezEl = Array.from(card.querySelectorAll("a")).find(a => (a.textContent || '').toLowerCase().includes("juez"));
-                const salaEl = Array.from(card.querySelectorAll("*")).find(el => (el.textContent || "").trim().startsWith("Sala"));
-                const fechaEl = card.querySelector("div.text-end, span.text-end, div[align='right']") ||
-                                Array.from(card.querySelectorAll("div, span")).find(el => /\\d{1,2}\\s+de\\s+\\w+\\s+de\\s+\\d{4}/i.test(el.textContent || ""));
+                const inner = card.innerText || card.textContent || "";
+                const juezMatch = inner.match(/Juez\\/a:\\s*([^\\n]+)/i);
+                const salaMatch = inner.match(/Sala:\\s*([^\\n]+)/i);
+                const fechaMatch = inner.match(/\\d{1,2}\\s+de\\s+\\w+\\s+de\\s+\\d{4}/);
 
-                const descripcionEl = card.querySelector("p") || card;
-                const descripcion = (descripcionEl.textContent || "").trim();
+                const descNode = q("p");
+                const descripcion = descNode ? (descNode.textContent || "").trim() : inner.trim();
 
                 return {
-                    numero: num,
+                    numero,
                     href,
                     pdfHref,
-                    juez: juezEl ? (juezEl.textContent || "").trim() : "",
-                    sala: salaEl ? (salaEl.textContent || "").trim() : "",
-                    fecha: fechaEl ? (fechaEl.textContent || "").trim() : "",
+                    juez: juezMatch ? juezMatch[1].trim() : "",
+                    sala: salaMatch ? salaMatch[1].trim() : "",
+                    fecha: fechaMatch ? fechaMatch[0].trim() : "",
                     descripcion
                 };
             });
@@ -295,13 +306,13 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
             debug_log("Corte Nacional: sin nodos de resultado y no se pudo leer body.")
 
     for rc in raw_cards:
-        numero_proceso = rc.get("numero", "") or ""
+        numero_proceso = (rc.get("numero") or "").strip()
         href = rc.get("href") or ""
         descripcion = rc.get("descripcion") or ""
         pdf_href = rc.get("pdfHref") or ""
-        juez = rc.get("juez") or ""
-        sala = rc.get("sala") or ""
-        fecha = rc.get("fecha") or ""
+        juez = (rc.get("juez") or "").strip()
+        sala = (rc.get("sala") or "").strip()
+        fecha = (rc.get("fecha") or "").strip()
 
         # Fallbacks por regex sobre la descripción
         import re
@@ -329,14 +340,14 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
 
         resultados.append({
             "fuente": "Corte Nacional de Justicia (nuevo)",
-            "titulo": (numero_proceso or descripcion.split("\n")[0] if descripcion else "Sentencia Corte Nacional").strip()[:180],
-            "descripcion": descripcion.split("\n")[0][:400],
+            "titulo": (numero_proceso or descripcion.split("\\n")[0] if descripcion else "Sentencia Corte Nacional").strip()[:180],
+            "descripcion": descripcion.split("\\n")[0][:400],
             "url": _abs_url(page.url, pdf_href or href or page.url),
             "pdf_url": _abs_url(page.url, pdf_href) if pdf_href else None,
             "numero_proceso": numero_proceso.strip(),
-            "juez": juez.strip(),
-            "sala": sala.strip(),
-            "fecha": fecha.strip()
+            "juez": juez,
+            "sala": sala,
+            "fecha": fecha
         })
     return _dedup(resultados)
 
