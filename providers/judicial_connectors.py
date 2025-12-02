@@ -233,6 +233,12 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
     try:
         await page.wait_for_load_state("networkidle", timeout=NAV_TIMEOUT_MS)
         await page.wait_for_selector("app-resultado, a[href*='Proceso'], a[href*='proceso'], a[href*='.pdf'], .card, article, div.result-card", timeout=8000)
+        if DEBUG:
+            try:
+                html_preview = (await page.content())[:1200]
+                debug_log(f"Corte Nacional HTML preview: {html_preview}")
+            except Exception:
+                debug_log("Corte Nacional: no se pudo obtener HTML preview.")
     except PWTimeout:
         await page.wait_for_timeout(1500)
 
