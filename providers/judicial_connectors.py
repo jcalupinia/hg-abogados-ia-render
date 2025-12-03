@@ -298,6 +298,41 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
     except Exception:
         raw_cards = []
 
+    # Intento adicional: extracción directa de tarjetas reales (.resultado-item.card)
+    try:
+        raw_cards = await page.evaluate("""
+        () => {
+            const cards = Array.from(document.querySelectorAll(".resultado-item.card"));
+            if (!cards.length) return [];
+            return cards.map(card => {
+                const q = sel => card.querySelector(sel);
+                const qt = sel => {
+                    const el = q(sel);
+                    return el ? (el.textContent || "").trim() : "";
+                };
+
+                const numero = qt("strong.text-truncate, a[href*='Proceso'], a[href*='proceso']");
+                const inner  = (card.innerText || card.textContent || "").replace(/\\s+/g, " ").trim();
+                const juezMatch  = inner.match(/Juez\\/?a?:\\s*([^\\n]+)/i);
+                const salaMatch  = inner.match(/Sala:\\s*([^\\n]+)/i);
+                const fechaMatch = inner.match(/\\d{1,2}\\s+de\\s+\\w+\\s+de\\s+\\d{4}/);
+                const descNode = q("p");
+
+                return {
+                    numero,
+                    href: "",
+                    pdfHref: "",
+                    juez: juezMatch ? juezMatch[1].trim() : qt("span.text-secondary.text-truncate"),
+                    sala: salaMatch ? salaMatch[1].trim() : (qt("span.text-secondary.text-wrap") || ""),
+                    fecha: fechaMatch ? fechaMatch[0].trim() : "",
+                    descripcion: descNode ? (descNode.textContent || "").trim() : inner
+                };
+            });
+        }
+        """)
+    except Exception:
+        pass
+
     if not raw_cards:
         try:
             body_txt = (await page.inner_text("body"))[:400]
