@@ -2,6 +2,7 @@ import os
 import asyncio
 from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin, quote
+import requests
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
 # ================================
@@ -224,6 +225,58 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
     """Corte Nacional - buscador nuevo (busquedasentencias.cortenacional.gob.ec)"""
     debug_log(f"Consultando Corte Nacional (nuevo) con: {texto}")
     resultados = []
+    # Intento directo vía API pública (evita scraping)
+    api_url = "https://api.funcionjudicial.gob.ec/BUSCADOR-SENTENCIAS-SERVICES/api/buscador-sentencias/query/sentencia/busqueda/buscarPorTipoBusqueda"
+    tipo_busqueda = _tipo_busqueda_corte_nacional(payload or {})
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "Origin": "https://busquedasentencias.cortenacional.gob.ec",
+        "Referer": "https://busquedasentencias.cortenacional.gob.ec/",
+        "User-Agent": "Mozilla/5.0 (compatible; H&G Abogados IA)"
+    }
+    recaptcha_token = os.getenv("CN_RECAPTCHA_TOKEN") or os.getenv("X_RECAPTCHA_TOKEN")
+    if recaptcha_token:
+        headers["X-reCAPTCHA-Token"] = recaptcha_token
+    body = {
+        "query": texto,
+        "orden": "SCORE",
+        "pageNumber": 0,
+        "pageSize": MAX_ITEMS,
+        "tipoBusqueda": tipo_busqueda,
+        "subBusqueda": "",
+        "sala": [],
+        "juezPonente": []
+    }
+    try:
+        resp = requests.post(api_url, json=body, headers=headers, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+        items = data.get("content") or []
+        for it in items[:MAX_ITEMS]:
+            numero_proceso = (it.get("numeroProceso") or "").strip()
+            juez = (it.get("juezPonente") or "").strip()
+            sala = (it.get("nombreSala") or "").strip()
+            fecha = (it.get("fechaProvidencia") or "").split("T")[0] if it.get("fechaProvidencia") else ""
+            pdf_url = it.get("urlPdf")
+            resumen_list = it.get("resumen") or []
+            descripcion = " ".join(resumen_list) if resumen_list else (it.get("descripcion") or "")
+            resultados.append({
+                "fuente": "Corte Nacional de Justicia (API)",
+                "titulo": numero_proceso or it.get("numeroResolucion") or "Sentencia Corte Nacional",
+                "descripcion": descripcion[:400],
+                "url": pdf_url or "",
+                "pdf_url": pdf_url,
+                "numero_proceso": numero_proceso,
+                "juez": juez,
+                "sala": sala,
+                "fecha": fecha,
+                "estado": it.get("nombreEstadoProceso"),
+                "materia": it.get("nombreMateria"),
+            })
+        return _dedup(resultados)
+    except Exception as e:
+        debug_log(f"API Corte Nacional falló: {e}; se intentará scraping (puede fallar por captcha/spa).")
     base = URLS["corte_nacional"].rstrip("/")
     query = quote(texto[:50])
     tipo_busqueda = _tipo_busqueda_corte_nacional(payload or {})
