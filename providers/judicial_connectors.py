@@ -480,11 +480,13 @@ async def _buscar_procesos_judiciales(page, texto: str) -> List[Dict[str, Any]]:
     resultados = []
     proxy_url = os.getenv("PROCESOS_PROXY_URL")
     if proxy_url:
+        debug_log(f"Proxy Procesos Judiciales URL: {proxy_url}")
         try:
             resp = requests.post(proxy_url, json={"texto": texto}, timeout=20)
             resp.raise_for_status()
             data = resp.json()
             items = data if isinstance(data, list) else (data.get("content") or [])
+            debug_log(f"Proxy Procesos Judiciales items: {len(items)}")
             for it in items[:MAX_ITEMS]:
                 numero_proceso = (it.get("idJuicio") or "").strip()
                 fecha = (it.get("fechaActividad") or "").split(" ")[0] if it.get("fechaActividad") else ""
