@@ -482,10 +482,19 @@ async def _buscar_procesos_judiciales(page, texto: str) -> List[Dict[str, Any]]:
     headers = {
         "Accept": "application/json, text/plain, */*",
         "Content-Type": "application/json",
+        "Accept-Language": "es-419,es;q=0.9",
         "Origin": "https://procesosjudiciales.funcionjudicial.gob.ec",
         "Referer": "https://procesosjudiciales.funcionjudicial.gob.ec/busqueda",
-        "User-Agent": "Mozilla/5.0 (compatible; H&G Abogados IA)"
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-site",
+        "Sec-GPC": "1",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
     }
+    cookie = os.getenv("PJ_COOKIE")
+    if cookie:
+        headers["Cookie"] = cookie
+
     recaptcha = os.getenv("PJ_RECAPTCHA_TOKEN") or os.getenv("X_RECAPTCHA_TOKEN") or "verdad"
     body = {
         "texto": texto,
