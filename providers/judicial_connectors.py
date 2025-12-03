@@ -489,6 +489,8 @@ async def _buscar_procesos_judiciales(page, texto: str) -> List[Dict[str, Any]]:
             debug_log(f"Proxy Procesos Judiciales items: {len(items)}")
             for it in items[:MAX_ITEMS]:
                 numero_proceso = (it.get("idJuicio") or "").strip()
+                uid = numero_proceso or str(it.get("idIncidenteJudicatura") or it.get("idMovimientoJuicioIncidente") or it.get("idTablaReferencia") or f"tmp-{len(resultados)}")
+                url_val = f"{proxy_url}?uid={uid}" if proxy_url else f"proxy://{uid}"
                 fecha = (it.get("fechaActividad") or "").split(" ")[0] if it.get("fechaActividad") else ""
                 titulo = (it.get("nombreProvidencia") or "").strip() or "Proceso judicial"
                 descripcion = (it.get("texto") or "").strip()
@@ -496,7 +498,7 @@ async def _buscar_procesos_judiciales(page, texto: str) -> List[Dict[str, Any]]:
                     "fuente": "Procesos Judiciales (proxy)",
                     "titulo": titulo[:180],
                     "descripcion": descripcion[:400],
-                    "url": "",
+                    "url": url_val or "",
                     "numero_proceso": numero_proceso,
                     "fecha": fecha,
                     "id_judicatura": it.get("idJudicatura"),
@@ -538,6 +540,8 @@ async def _buscar_procesos_judiciales(page, texto: str) -> List[Dict[str, Any]]:
         items = resp.json() or []
         for it in items[:MAX_ITEMS]:
             numero_proceso = (it.get("idJuicio") or "").strip()
+            uid = numero_proceso or str(it.get("idIncidenteJudicatura") or it.get("idMovimientoJuicioIncidente") or it.get("idTablaReferencia") or f"tmp-{len(resultados)}")
+            url_val = f"https://procesosjudiciales.funcionjudicial.gob.ec/coincidencias?uid={uid}"
             fecha = (it.get("fechaActividad") or "").split(" ")[0] if it.get("fechaActividad") else ""
             titulo = (it.get("nombreProvidencia") or "").strip() or "Proceso judicial"
             descripcion = it.get("texto") or ""
@@ -545,7 +549,7 @@ async def _buscar_procesos_judiciales(page, texto: str) -> List[Dict[str, Any]]:
                 "fuente": "Procesos Judiciales (API)",
                 "titulo": titulo[:180],
                 "descripcion": descripcion[:400],
-                "url": "",  # no hay URL directa en este endpoint
+                "url": url_val,
                 "numero_proceso": numero_proceso,
                 "fecha": fecha,
                 "id_judicatura": it.get("idJudicatura"),
