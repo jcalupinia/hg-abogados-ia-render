@@ -475,62 +475,49 @@ async def _buscar_corte_nacional(page, texto: str, payload: Optional[Dict[str, A
 
 
 async def _buscar_procesos_judiciales(page, texto: str) -> List[Dict[str, Any]]:
-    """Buscador E-SATJE Procesos Judiciales (procesosjudiciales.funcionjudicial.gob.ec/busqueda)"""
-    debug_log(f"Consultando Procesos Judiciales con: {texto}")
+    """Buscador E-SATJE Procesos Judiciales vía API (evita captcha)."""
+    debug_log(f"Consultando Procesos Judiciales (API) con: {texto}")
     resultados = []
-    await page.goto(URLS["procesos_judiciales"], wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
-
-    q_sel = await _first_selector(page, [
-        'input[placeholder*="palabras"]',
-        'input[placeholder*="Buscar"]',
-        'input[id*="form-search"]',
-        'input[type="text"]'
-    ])
-    b_sel = await _first_selector(page, [
-        'button[aria-label*="buscar"]',
-        'button:has-text("Buscar")',
-        'button[type="submit"]',
-        'button.mat-primary',
-        'button[aria-label*="Buscar"]'
-    ])
-    if not q_sel:
-        return []
-
-    await page.fill(q_sel, texto[:80])
-    captcha_clicked = await _click_recaptcha_checkbox(page)
-    if b_sel:
-        debug_log("Procesos Judiciales: click primer Buscar.")
-        await page.click(b_sel)
-        if captcha_clicked:
-            await page.wait_for_timeout(800)
-            debug_log("Procesos Judiciales: click segundo Buscar (post-captcha).")
-            await page.click(b_sel)
-    else:
-        await page.press(q_sel, "Enter")
+    api_url = "https://api.funcionjudicial.gob.ec/MANTICORE-SERVICE/api/manticore/consulta/coincidencias"
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "Origin": "https://procesosjudiciales.funcionjudicial.gob.ec",
+        "Referer": "https://procesosjudiciales.funcionjudicial.gob.ec/busqueda",
+        "User-Agent": "Mozilla/5.0 (compatible; H&G Abogados IA)"
+    }
+    recaptcha = os.getenv("PJ_RECAPTCHA_TOKEN") or os.getenv("X_RECAPTCHA_TOKEN") or "verdad"
+    body = {
+        "texto": texto,
+        "recaptcha": recaptcha
+    }
+    params = {"page": 1, "size": MAX_ITEMS}
 
     try:
-        await page.wait_for_load_state("networkidle", timeout=NAV_TIMEOUT_MS)
-    except PWTimeout:
-        await page.wait_for_timeout(1500)
-
-    # Los resultados suelen estar en tarjetas/enlaces; recolectamos anclas visibles
-    nodes = await page.query_selector_all("a, .card, .resultado, tr")
-    for n in nodes[:MAX_ITEMS]:
-        try:
-            anchor = await n.query_selector("a") if (await n.query_selector("a")) else n
-            href = await anchor.get_attribute("href") if anchor else None
-            txt = await _safe_inner_text(n)
-            if not txt and not href:
-                continue
+        resp = requests.post(api_url, json=body, params=params, headers=headers, timeout=20)
+        resp.raise_for_status()
+        items = resp.json() or []
+        for it in items[:MAX_ITEMS]:
+            numero_proceso = (it.get("idJuicio") or "").strip()
+            fecha = (it.get("fechaActividad") or "").split(" ")[0] if it.get("fechaActividad") else ""
+            titulo = (it.get("nombreProvidencia") or "").strip() or "Proceso judicial"
+            descripcion = it.get("texto") or ""
             resultados.append({
-                "fuente": "Procesos Judiciales",
-                "titulo": (txt.split("\n")[0] if txt else "Proceso judicial").strip()[:180],
-                "descripcion": txt[:200],
-                "url": _abs_url(page.url, href) if href else page.url
+                "fuente": "Procesos Judiciales (API)",
+                "titulo": titulo[:180],
+                "descripcion": descripcion[:400],
+                "url": "",  # no hay URL directa en este endpoint
+                "numero_proceso": numero_proceso,
+                "fecha": fecha,
+                "id_judicatura": it.get("idJudicatura"),
+                "estado": it.get("estado"),
+                "tabla_referencia": it.get("tablaReferencia"),
+                "id_incidente": it.get("idIncidenteJudicatura")
             })
-        except Exception:
-            continue
-    return _dedup(resultados)
+        return _dedup(resultados)
+    except Exception as e:
+        debug_log(f"API Procesos Judiciales falló: {e}")
+        return [{"error": f"No se pudo consultar Procesos Judiciales vía API: {e}", "nivel_consulta": "Procesos Judiciales"}]
 
 # ================================
 # 🚀 FUNCIÓN ASÍNCRONA PRINCIPAL
