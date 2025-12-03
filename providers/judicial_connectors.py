@@ -478,6 +478,34 @@ async def _buscar_procesos_judiciales(page, texto: str) -> List[Dict[str, Any]]:
     """Buscador E-SATJE Procesos Judiciales vía API (evita captcha)."""
     debug_log(f"Consultando Procesos Judiciales (API) con: {texto}")
     resultados = []
+    proxy_url = os.getenv("PROCESOS_PROXY_URL")
+    if proxy_url:
+        try:
+            resp = requests.post(proxy_url, json={"texto": texto}, timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+            items = data if isinstance(data, list) else (data.get("content") or [])
+            for it in items[:MAX_ITEMS]:
+                numero_proceso = (it.get("idJuicio") or "").strip()
+                fecha = (it.get("fechaActividad") or "").split(" ")[0] if it.get("fechaActividad") else ""
+                titulo = (it.get("nombreProvidencia") or "").strip() or "Proceso judicial"
+                descripcion = (it.get("texto") or "").strip()
+                resultados.append({
+                    "fuente": "Procesos Judiciales (proxy)",
+                    "titulo": titulo[:180],
+                    "descripcion": descripcion[:400],
+                    "url": "",
+                    "numero_proceso": numero_proceso,
+                    "fecha": fecha,
+                    "id_judicatura": it.get("idJudicatura"),
+                    "estado": it.get("estado"),
+                    "tabla_referencia": it.get("tablaReferencia"),
+                    "id_incidente": it.get("idIncidenteJudicatura")
+                })
+            return _dedup(resultados)
+        except Exception as e:
+            debug_log(f"Proxy Procesos Judiciales falló: {e}; se intentará API directa.")
+
     api_url = "https://api.funcionjudicial.gob.ec/MANTICORE-SERVICE/api/manticore/consulta/coincidencias"
     headers = {
         "Accept": "application/json, text/plain, */*",
