@@ -814,7 +814,7 @@ def _map_seleccion_items(items: List[Dict[str, Any]], etiqueta: str) -> List[Dic
             "numero_caso": _pick(nodo, ["numeroCausa", "numerocausa"]),
             "numero_caso_auto": _pick(nodo, ["numeroCausaAuto", "numerocausaauto"]),
             "caso_judicatura": nodo.get("casoJudicatura") or "",
-            "fecha": _norm_fecha(nodo.get("fechaIngreso")),
+            "fecha": _norm_fecha(_pick(nodo, ["fechaIngreso", "fechaingreso", "fecha"])),
             "juez": _pick(nodo, ["nombrejuez", "juez"]),
             "pronunciamiento": _pick(nodo, ["pronunciamientoDelInferior", "pronunciamientoInferior", "pronunciamiento"]),
             "estado": _pick(nodo, ["estadoProcesal", "estado", "estadoProceso"]),
