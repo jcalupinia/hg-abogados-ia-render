@@ -1,7 +1,7 @@
 # ======================================================
-# H&G ABOGADOS IA - ROBOT JURÍDICO AUTOMATIZADO
+# H&G ABOGADOS IA - ROBOT JURÃDICO AUTOMATIZADO
 # Compatible con Render.com + FastAPI + Playwright
-# Versión estable 2025-11
+# VersiÃ³n estable 2025-11
 # ======================================================
 
 from fastapi import FastAPI, Request, HTTPException
@@ -14,19 +14,19 @@ import uvloop
 import nest_asyncio
 
 # ============================================
-# ⚙️ Compatibilidad con entorno Render (modo sandbox)
+# âš™ï¸ Compatibilidad con entorno Render (modo sandbox)
 # ============================================
 try:
     import nest_asyncio
     nest_asyncio.apply()
     import uvloop
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-    print("✅ Modo Render seguro activado (nest_asyncio + uvloop)")
+    print("âœ… Modo Render seguro activado (nest_asyncio + uvloop)")
 except Exception as e:
-    print(f"⚠️ No se aplicó uvloop/nest_asyncio: {e}")
+    print(f"âš ï¸ No se aplicÃ³ uvloop/nest_asyncio: {e}")
 
 # ============================================
-# 🔌 Importación de conectores
+# Importacion de conectores
 # ============================================
 try:
     from providers.fielweb_connector import consultar_fielweb
@@ -34,24 +34,28 @@ try:
         consultar_jurisprudencia,
         consultar_corte_nacional,
         consultar_procesos_judiciales,
+        consultar_juriscopio,
     )
     from providers.uafe_connector import consultar_uafe
-    print("✅ Conectores cargados correctamente.")
+    print("Conectores cargados correctamente.")
 except ModuleNotFoundError as e:
     consultar_fielweb = None
     consultar_jurisprudencia = None
+    consultar_corte_nacional = None
+    consultar_procesos_judiciales = None
+    consultar_juriscopio = None
     consultar_uafe = None
-    print(f"⚠️ Error al importar conectores: {e}")
+    print(f"Error al importar conectores: {e}")
 
 # ============================================
-# 🚀 Inicialización del servicio FastAPI
+# ðŸš€ InicializaciÃ³n del servicio FastAPI
 # ============================================
-app = FastAPI(title="H&G Abogados IA - Robot Jurídico Inteligente")
+app = FastAPI(title="H&G Abogados IA - Robot JurÃ­dico Inteligente")
 API_KEY = os.getenv("X_API_KEY")
 API_KEY_DISABLED = os.getenv("DISABLE_API_KEY", "false").lower() == "true"
 
 # ============================================
-# 🔐 Middleware de seguridad por API Key
+# ðŸ” Middleware de seguridad por API Key
 # ============================================
 @app.middleware("http")
 async def verify_api_key(request: Request, call_next):
@@ -70,11 +74,11 @@ async def verify_api_key(request: Request, call_next):
 
     key = request.headers.get("X-API-Key")
     if key != API_KEY:
-        raise HTTPException(status_code=401, detail="API Key inválida o ausente.")
+        raise HTTPException(status_code=401, detail="API Key invÃ¡lida o ausente.")
     return await call_next(request)
 
 # ============================================
-# ✅ Endpoints básicos
+# âœ… Endpoints bÃ¡sicos
 # ============================================
 @app.get("/")
 async def root():
@@ -85,7 +89,7 @@ async def health():
     return {"status": "ok", "service": "H&G Abogados IA"}
 
 # ============================================
-# ⚖️ Consultas FielWeb
+# âš–ï¸ Consultas FielWeb
 # ============================================
 @app.post("/consult_real_fielweb")
 async def consult_fielweb_endpoint(payload: dict):
@@ -98,7 +102,7 @@ async def consult_fielweb_endpoint(payload: dict):
         raise HTTPException(status_code=500, detail=f"Error FielWeb: {str(e)}")
 
 # ============================================
-# ⚖️ Consultas Jurisprudenciales
+# âš–ï¸ Consultas Jurisprudenciales
 # ============================================
 @app.post("/consult_real_jurisprudencia")
 async def consult_jurisprudencia_endpoint(payload: dict):
@@ -111,7 +115,7 @@ async def consult_jurisprudencia_endpoint(payload: dict):
         raise HTTPException(status_code=500, detail=f"Error Jurisprudencia: {str(e)}")
 
 # ============================================
-# 🔎 Consulta individual Corte Nacional (nuevo buscador)
+# ðŸ”Ž Consulta individual Corte Nacional (nuevo buscador)
 # ============================================
 @app.post("/consult_corte_nacional")
 async def consult_corte_nacional_endpoint(payload: dict):
@@ -124,7 +128,7 @@ async def consult_corte_nacional_endpoint(payload: dict):
         raise HTTPException(status_code=500, detail=f"Error Corte Nacional: {str(e)}")
 
 # ============================================
-# 🔎 Consulta individual Procesos Judiciales (E-SATJE)
+# Consulta individual Procesos Judiciales (E-SATJE)
 # ============================================
 @app.post("/consult_procesos_judiciales")
 async def consult_procesos_judiciales_endpoint(payload: dict):
@@ -137,7 +141,19 @@ async def consult_procesos_judiciales_endpoint(payload: dict):
         raise HTTPException(status_code=500, detail=f"Error Procesos Judiciales: {str(e)}")
 
 # ============================================
-# 🔎 Consulta UAFE (sujetos obligados)
+# Consulta Juriscopio
+# ============================================
+@app.post("/consult_juriscopio")
+async def consult_juriscopio_endpoint(payload: dict):
+    if not consultar_juriscopio:
+        raise HTTPException(status_code=500, detail="Conector Juriscopio no disponible.")
+    try:
+        return await run_in_threadpool(consultar_juriscopio, payload)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error Juriscopio: {str(e)}")
+
+# ðŸ”Ž Consulta UAFE (sujetos obligados)
 # ============================================
 @app.post("/consult_real_uafe")
 async def consult_uafe_endpoint(payload: dict):
@@ -156,7 +172,7 @@ async def consult_uafe_endpoint(payload: dict):
         )
 
 # ============================================
-# 🤖 Flujo Híbrido (Normativa + Jurisprudencia)
+# ðŸ¤– Flujo HÃ­brido (Normativa + Jurisprudencia)
 # ============================================
 @app.post("/consult_hybrid")
 async def consult_hybrid(payload: dict):
@@ -174,7 +190,7 @@ async def consult_hybrid(payload: dict):
 
         return {
             "status": "ok",
-            "mensaje": "Consulta híbrida completada con éxito",
+            "mensaje": "Consulta hÃ­brida completada con Ã©xito",
             "texto_consultado": texto,
             "tipo_usuario": tipo,
             "fuentes_consultadas": {
@@ -186,10 +202,10 @@ async def consult_hybrid(payload: dict):
 
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error híbrido: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error hÃ­brido: {str(e)}")
 
 # ============================================
-# 🧠 Diagnóstico de entorno
+# ðŸ§  DiagnÃ³stico de entorno
 # ============================================
 def _ping_url(url: str, label: str) -> dict:
     """Prueba de conectividad HTTP simple con User-Agent de navegador."""
@@ -221,18 +237,18 @@ async def check_external_sources():
     fuentes = [
         ("fielweb", "FielWeb", os.getenv("FIELWEB_LOGIN_URL", "https://www.fielweb.com/Cuenta/Login.aspx")),
         ("satje", "SATJE", "https://www.funcionjudicial.gob.ec"),
-        ("procesos_judiciales", "Procesos Judiciales (búsqueda)", "https://procesosjudiciales.funcionjudicial.gob.ec/busqueda"),
+        ("procesos_judiciales", "Procesos Judiciales (bÃºsqueda)", "https://procesosjudiciales.funcionjudicial.gob.ec/busqueda"),
         ("corte_constitucional_portal", "Corte Constitucional (portal)", "https://www.corteconstitucional.gob.ec/"),
-        ("corte_constitucional_relatoria", "Corte Constitucional (relatoría)", os.getenv("CORTE_CONSTITUCIONAL_URL", "https://portal.corteconstitucional.gob.ec/FichaRelatoria")),
+        ("corte_constitucional_relatoria", "Corte Constitucional (relatorÃ­a)", os.getenv("CORTE_CONSTITUCIONAL_URL", "https://portal.corteconstitucional.gob.ec/FichaRelatoria")),
         ("corte_nacional_portal", "Corte Nacional (portal)", "https://www.cortenacional.gob.ec/cnj/"),
-        ("corte_nacional_relatoria", "Corte Nacional (ficha relatoría)", os.getenv("CORTE_NACIONAL_URL", "https://portalcortej.justicia.gob.ec/FichaRelatoria")),
+        ("corte_nacional_relatoria", "Corte Nacional (ficha relatorÃ­a)", os.getenv("CORTE_NACIONAL_URL", "https://portalcortej.justicia.gob.ec/FichaRelatoria")),
         ("corte_nacional_nuevo", "Corte Nacional (buscador nuevo)", os.getenv("CORTE_NACIONAL_NUEVO_URL", "https://busquedasentencias.cortenacional.gob.ec/")),
         ("consejo_judicatura", "Consejo de la Judicatura", "https://www.funcionjudicial.gob.ec/"),
         ("tce", "Tribunal Contencioso Electoral", "https://www.tce.gob.ec/"),
         ("sri_home", "SRI (home)", "https://www.sri.gob.ec/web/intersri/home"),
         ("sri_principal", "SRI (principal)", "https://www.sri.gob.ec/"),
         ("trabajo", "Ministerio de Trabajo", "https://www.trabajo.gob.ec/"),
-        ("supercias", "Superintendencia de Compañías", "https://www.supercias.gob.ec/portalscvs/index.htm"),
+        ("supercias", "Superintendencia de CompaÃ±Ã­as", "https://www.supercias.gob.ec/portalscvs/index.htm"),
         ("senae", "SENAE", "https://www.aduana.gob.ec/"),
         ("uafe", "UAFE", os.getenv("UAFE_URL", "https://www.uafe.gob.ec/resoluciones-sujetos-obligados/"))
     ]
@@ -252,7 +268,7 @@ async def check_external_sources():
 
 @app.get("/check_corte_nacional_status")
 async def check_corte_nacional_status():
-    """Diagnóstico rápido de conectividad a los portales de la Corte Nacional (antiguo y nuevo)."""
+    """DiagnÃ³stico rÃ¡pido de conectividad a los portales de la Corte Nacional (antiguo y nuevo)."""
     try:
         urls = {
             "corte_nacional": os.getenv("CORTE_NACIONAL_URL", "https://busquedasentencias.cortenacional.gob.ec/")
@@ -277,7 +293,7 @@ async def check_corte_nacional_status():
 
 @app.get("/check_corte_constitucional_status")
 async def check_corte_constitucional_status():
-    """Diagnóstico rápido de conectividad al buscador de la Corte Constitucional."""
+    """DiagnÃ³stico rÃ¡pido de conectividad al buscador de la Corte Constitucional."""
     try:
         url = os.getenv("CORTE_CONSTITUCIONAL_URL", "http://buscador.corteconstitucional.gob.ec/buscador-externo/principal")
         detalle = [{"id": "corte_constitucional", **_ping_url(url, "Corte Constitucional")}]
@@ -298,7 +314,7 @@ async def check_corte_constitucional_status():
 
 @app.get("/check_uafe_status")
 async def check_uafe_status():
-    """Diagnóstico rápido de conectividad al portal de UAFE (resoluciones)."""
+    """DiagnÃ³stico rÃ¡pido de conectividad al portal de UAFE (resoluciones)."""
     try:
         url = os.getenv("UAFE_URL", "https://www.uafe.gob.ec/resoluciones-sujetos-obligados/")
         detalle = [{"id": "uafe", **_ping_url(url, "UAFE")}]
@@ -320,14 +336,14 @@ async def check_uafe_status():
 @app.get("/check_fielweb_status")
 async def check_fielweb_status():
     """
-    🔍 Verifica la configuración completa del entorno FielWeb y Render.
-    Muestra estado de Playwright, variables de entorno, loop y autenticación.
+    ðŸ” Verifica la configuraciÃ³n completa del entorno FielWeb y Render.
+    Muestra estado de Playwright, variables de entorno, loop y autenticaciÃ³n.
     """
     import sys
     import platform
     from providers import check_providers_status
 
-    # --- Comprobación básica del entorno ---
+    # --- ComprobaciÃ³n bÃ¡sica del entorno ---
     loop_type = str(type(asyncio.get_running_loop()))
     render_mode = "Render (uvloop seguro)" if "uvloop" in loop_type else "Local / VSCode"
 
@@ -337,36 +353,36 @@ async def check_fielweb_status():
     except Exception as e:
         provider_status = {"error": f"No se pudo obtener estado de providers: {str(e)}"}
 
-    # --- Verificar instalación de Playwright ---
+    # --- Verificar instalaciÃ³n de Playwright ---
     try:
         import playwright
-        playwright_status = "✅ Instalado correctamente"
+        playwright_status = "âœ… Instalado correctamente"
     except Exception as e:
-        playwright_status = f"❌ No disponible ({str(e)})"
+        playwright_status = f"âŒ No disponible ({str(e)})"
 
     # --- Verificar credenciales FielWeb ---
     user = os.getenv("FIELWEB_USERNAME")
     pwd = os.getenv("FIELWEB_PASSWORD")
     url = os.getenv("FIELWEB_LOGIN_URL")
     credenciales_ok = all([user, pwd, url])
-    credenciales_estado = "✅ Configuradas" if credenciales_ok else "⚠️ Incompletas"
+    credenciales_estado = "âœ… Configuradas" if credenciales_ok else "âš ï¸ Incompletas"
 
-    # --- Test rápido de acceso a la URL de FielWeb ---
+    # --- Test rÃ¡pido de acceso a la URL de FielWeb ---
     import requests
     try:
         resp = requests.get(url, timeout=8)
         if resp.status_code == 200:
-            conexion_estado = "✅ Acceso correcto a FielWeb"
+            conexion_estado = "âœ… Acceso correcto a FielWeb"
         elif resp.status_code == 403:
-            conexion_estado = "⚠️ Bloqueo 403 (IP o sesión restringida)"
+            conexion_estado = "âš ï¸ Bloqueo 403 (IP o sesiÃ³n restringida)"
         else:
-            conexion_estado = f"⚠️ Respuesta inesperada HTTP {resp.status_code}"
+            conexion_estado = f"âš ï¸ Respuesta inesperada HTTP {resp.status_code}"
     except Exception as e:
-        conexion_estado = f"❌ Error de conexión: {str(e)}"
+        conexion_estado = f"âŒ Error de conexiÃ³n: {str(e)}"
 
     # --- Resumen de entorno ---
     return {
-        "estado": "verificación completada",
+        "estado": "verificaciÃ³n completada",
         "entorno": render_mode,
         "python_version": sys.version.split()[0],
         "so": platform.system(),
@@ -376,14 +392,16 @@ async def check_fielweb_status():
         "url_login": url,
         "conexion_fielweb": conexion_estado,
         "providers": provider_status,
-        "api_key_configurada": "✅" if os.getenv("X_API_KEY") else "❌ No definida",
+        "api_key_configurada": "âœ…" if os.getenv("X_API_KEY") else "âŒ No definida",
         "debug_mode": os.getenv("DEBUG", "false"),
     }
 
 # ============================================
-# 🧩 Ejecución local o Render
+# ðŸ§© EjecuciÃ³n local o Render
 # ============================================
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10000))
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=port)
+
+
