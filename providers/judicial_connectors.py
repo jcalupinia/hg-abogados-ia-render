@@ -1,5 +1,7 @@
 import os
 import asyncio
+import base64
+import json
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin, quote
@@ -131,11 +133,13 @@ def _headers_juriscopio(referer: str) -> Dict[str, str]:
     }
 
 def _post_juriscopio(url: str, body: Dict[str, Any], referer: str) -> Dict[str, Any]:
-    resp = requests.post(url, json=body, headers=_headers_juriscopio(referer), timeout=25)
+    encoded = base64.b64encode(json.dumps(body, ensure_ascii=False).encode("utf-8")).decode("utf-8")
+    payload = {"dato": encoded}
+    resp = requests.post(url, json=payload, headers=_headers_juriscopio(referer), timeout=25)
     try:
         data = resp.json()
     except Exception:
-        data = {"error": f"Respuesta no JSON (HTTP {resp.status_code})"}
+        data = {"error": f"Respuesta no JSON (HTTP {resp.status_code})", "text": resp.text[:500]}
     if resp.status_code >= 400:
         raise RuntimeError(f"Juriscopio respondió {resp.status_code}: {data}")
     return data
