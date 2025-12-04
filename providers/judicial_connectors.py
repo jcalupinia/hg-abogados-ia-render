@@ -1,5 +1,6 @@
 import os
 import asyncio
+from datetime import datetime
 from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin, quote
 import requests
@@ -41,6 +42,7 @@ URLS = {
     # Se utiliza el buscador nuevo como URL principal de la Corte Nacional
     "corte_nacional": os.getenv("CORTE_NACIONAL_URL", "https://busquedasentencias.cortenacional.gob.ec/").strip(),
     "procesos_judiciales": os.getenv("PROCESOS_JUDICIALES_URL", "https://procesosjudiciales.funcionjudicial.gob.ec/busqueda").strip(),
+    "juriscopio_base": os.getenv("JURISCOPIO_BASE", "https://buscador.corteconstitucional.gob.ec").strip(),
 }
 
 PAGE_TIMEOUT_MS = 30_000
@@ -100,6 +102,49 @@ def _dedup(items: List[Dict[str, Any]], key: str = "url") -> List[Dict[str, Any]
             seen.add(val)
             out.append(i)
     return out
+
+def _norm_fecha(valor: Any) -> str:
+    """
+    Convierte timestamps en ms o strings a un formato ISO corto YYYY-MM-DD.
+    """
+    if valor is None:
+        return ""
+    try:
+        # epoch en ms o s
+        if isinstance(valor, (int, float)):
+            if valor > 10_000_000_000:  # ms
+                valor = valor / 1000.0
+            return datetime.utcfromtimestamp(valor).strftime("%Y-%m-%d")
+        if isinstance(valor, str):
+            return valor.strip()
+    except Exception:
+        return ""
+    return ""
+
+def _headers_juriscopio(referer: str) -> Dict[str, str]:
+    return {
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "Origin": URLS["juriscopio_base"],
+        "Referer": referer,
+        "User-Agent": "Mozilla/5.0 (H&G Abogados IA)",
+    }
+
+def _post_juriscopio(url: str, body: Dict[str, Any], referer: str) -> Dict[str, Any]:
+    resp = requests.post(url, json=body, headers=_headers_juriscopio(referer), timeout=25)
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"error": f"Respuesta no JSON (HTTP {resp.status_code})"}
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Juriscopio respondió {resp.status_code}: {data}")
+    return data
+
+def _pick(d: Dict[str, Any], keys: List[str]) -> Any:
+    for k in keys:
+        if k in d and d[k] not in (None, "", []):
+            return d[k]
+    return ""
 
 async def _click_recaptcha_checkbox(page) -> bool:
     """
@@ -703,3 +748,300 @@ def consultar_jurisprudencia(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": f"Tiempo de espera agotado: {te}", "nivel_consulta": "Jurisprudencia"}
     except Exception as e:
         return {"error": f"Error general al consultar jurisprudencia: {e}", "nivel_consulta": "Jurisprudencia"}
+
+# ================================
+# Juriscopio (API directa)
+# ================================
+def _paginacion_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    page = int(payload.get("page") or payload.get("pageNumber") or 1)
+    size = int(payload.get("page_size") or payload.get("pageSize") or 20)
+    return {"page": page, "pageSize": size, "total": 0, "contar": True}
+
+
+def _map_causa_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    resultados = []
+    for it in items:
+        causa = it.get("causa") or {}
+        h_text = " ".join(it.get("highlight", {}).get("textogeneral", []) or [])
+        resultados.append({
+            "fuente": "Juriscopio - Causas",
+            "numero_caso": causa.get("numerocausa") or "",
+            "fecha": _norm_fecha(causa.get("fechaingreso")),
+            "juez": causa.get("nombrejuez") or causa.get("loginjuez") or "",
+            "accion": causa.get("accion") or causa.get("tipoaccion") or "",
+            "pdf_url": causa.get("urlauto"),
+            "descripcion": causa.get("textogeneral") or h_text or "",
+            "score": it.get("score"),
+            "id_causa": causa.get("idcausa"),
+            "id": causa.get("id"),
+        })
+    return resultados
+
+
+def _map_sentencia_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    resultados = []
+    for it in items:
+        sentencia = it.get("sentencia") or it
+        h_text = " ".join(it.get("highlight", {}).get("textogeneral", []) or [])
+        numero_sentencia = _pick(sentencia, ["numeroSentencia", "numSentencia", "numerosentencia", "numero"])
+        numero_causa = _pick(sentencia, ["numeroCausa", "numCausa", "numerocausa"])
+        resultados.append({
+            "fuente": "Juriscopio - Sentencias",
+            "numero_sentencia": numero_sentencia,
+            "numero_caso": numero_causa,
+            "fecha": _norm_fecha(_pick(sentencia, ["fechaDecision", "fechaNotificacion", "fecha", "fechaIngreso"])),
+            "juez": _pick(sentencia, ["nombrejuez", "juez", "juezPonente", "loginjuez"]),
+            "materia": sentencia.get("materia") or "",
+            "decision": _pick(sentencia, ["decision", "resolucion"]),
+            "pdf_url": _pick(sentencia, ["urlPdf", "urlpdf", "urlSentencia", "urlauto"]),
+            "descripcion": sentencia.get("textogeneral") or h_text or sentencia.get("descripcion") or "",
+            "score": it.get("score"),
+        })
+    return resultados
+
+
+def _map_seleccion_items(items: List[Dict[str, Any]], etiqueta: str) -> List[Dict[str, Any]]:
+    resultados = []
+    for it in items:
+        nodo = it.get("causa") or it.get("auto") or it.get("seleccion") or it
+        h_text = " ".join(it.get("highlight", {}).get("textogeneral", []) or [])
+        resultados.append({
+            "fuente": f"Juriscopio - {etiqueta}",
+            "numero_caso": _pick(nodo, ["numeroCausa", "numerocausa"]),
+            "numero_caso_auto": _pick(nodo, ["numeroCausaAuto", "numerocausaauto"]),
+            "caso_judicatura": nodo.get("casoJudicatura") or "",
+            "fecha": _norm_fecha(nodo.get("fechaIngreso")),
+            "juez": _pick(nodo, ["nombrejuez", "juez"]),
+            "pronunciamiento": _pick(nodo, ["pronunciamientoDelInferior", "pronunciamientoInferior", "pronunciamiento"]),
+            "estado": _pick(nodo, ["estadoProcesal", "estado", "estadoProceso"]),
+            "pdf_url": _pick(nodo, ["urlPdf", "urlauto", "urlAuto", "url"]),
+            "descripcion": nodo.get("textogeneral") or h_text or "",
+            "score": it.get("score"),
+        })
+    return resultados
+
+
+def _map_admision_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    resultados = []
+    for it in items:
+        nodo = it.get("admision") or it
+        h_text = " ".join(it.get("highlight", {}).get("textogeneral", []) or [])
+        resultados.append({
+            "fuente": "Juriscopio - Admisión",
+            "numero_caso": _pick(nodo, ["numeroCausa", "numerocausa"]),
+            "fecha": _norm_fecha(_pick(nodo, ["fechaDecision", "fecha", "fechaIngreso"])),
+            "juez": _pick(nodo, ["juez", "nombrejuez"]),
+            "tipo_accion": _pick(nodo, ["tipoaccion", "tipoAccion"]),
+            "decision": nodo.get("decision") or "",
+            "pdf_url": _pick(nodo, ["urlPdf", "url"]),
+            "descripcion": nodo.get("textogeneral") or h_text or "",
+            "score": it.get("score"),
+        })
+    return resultados
+
+
+def _build_causa_payload(texto: str, numero: str, modo: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    base = {
+        "textoSubconsulta": "",
+        "legitimados": "",
+        "paginacion": _paginacion_from_payload(payload),
+        "textoCausa": texto or numero,
+        "contexto": None,
+        "accion": None,
+        "juez": None,
+        "jueces": [],
+        "tipoAcciones": None,
+        "idProvincia": "",
+        "provincia": None,
+        "fechaDesde": None,
+        "fechaHasta": None,
+        "sort": payload.get("sort", "relevancia"),
+        "porFraseExacta": bool(payload.get("por_frase_exacta", False)),
+        "opcionBusqueda": 3,
+        "contextoSearch": None
+    }
+    if modo == "numero":
+        base["textoCausa"] = numero or texto
+        base["contexto"] = "CAUSA"
+        base["opcionBusqueda"] = 4
+    elif modo == "judicatura":
+        base["textoCausa"] = numero or texto
+        base["contexto"] = "CAUSA"
+        base["opcionBusqueda"] = 5
+    else:
+        base["opcionBusqueda"] = 3
+        base["porFraseExacta"] = bool(payload.get("por_frase_exacta", False))
+    return base
+
+
+def _build_sentencia_payload(texto: str, numero: str, modo: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    base = {
+        "numSentencia": "",
+        "numeroCausa": "",
+        "textoSentencia": "",
+        "motivo": "",
+        "metadata": "",
+        "subBusqueda": "",
+        "tipoLegitimado": 0,
+        "legitimados": "",
+        "tipoAcciones": [],
+        "materias": [],
+        "intereses": [],
+        "decisiones": [],
+        "jueces": [],
+        "derechoDemandado": [],
+        "derechosTratado": [],
+        "derechosVulnerado": [],
+        "temaEspecificos": [],
+        "conceptos": [],
+        "fechaNotificacion": "",
+        "fechaDecision": "",
+        "sort": payload.get("sort", "relevancia"),
+        "precedenteAprobado": "",
+        "precedentePropuesto": "",
+        "tipoNormas": [],
+        "asuntos": [],
+        "analisisMerito": "",
+        "novedad": "",
+        "merito": "",
+        "paginacion": _paginacion_from_payload(payload)
+    }
+    if modo == "numero_sentencia":
+        base["numSentencia"] = numero or texto
+        base["sort"] = payload.get("sort", "desc")
+    elif modo == "numero_caso":
+        base["numeroCausa"] = numero or texto
+        base["sort"] = payload.get("sort", "desc")
+    else:
+        base["textoSentencia"] = texto
+    return base
+
+
+def _build_seleccion_payload(tipo: str, texto: str, numero: str, modo: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    base = {
+        "textoGeneral": "",
+        "numeroCausa": "",
+        "numeroCausaAuto": "",
+        "sort": payload.get("sort", "relevancia"),
+        "paginacion": _paginacion_from_payload(payload),
+        "subBusqueda": "",
+        "textoAuto": "",
+        "tipoAcciones": [],
+        "jueces": [],
+        "derechoDemandado": [],
+        "derechosTratado": [],
+        "derechosVulnerado": [],
+        "juridico": [],
+        "pronunciamientos": [],
+        "casoJudicatura": "",
+        "fechaIngreso": "",
+        "legitimados": "",
+        "gruposAtencion": [],
+        "estadosProcesal": [],
+        "contexto": [],
+    }
+    if tipo == "autos":
+        if modo == "numero":
+            base["numeroCausaAuto"] = numero or texto
+            base["contexto"] = [1]
+            base["sort"] = payload.get("sort", "desc")
+        else:
+            base["textoAuto"] = texto
+            base["contexto"] = [2]
+    else:
+        if modo == "numero":
+            base["numeroCausa"] = numero or texto
+            base["contexto"] = [1]
+            base["sort"] = payload.get("sort", "desc")
+        elif modo == "judicatura":
+            base["casoJudicatura"] = numero or texto
+        else:
+            base["textoGeneral"] = texto
+    return base
+
+
+def _build_admision_payload(texto: str, numero: str, modo: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    base = {
+        "textoGeneral": texto if modo == "texto" else "",
+        "numeroCausa": numero if modo == "numero" else "",
+        "sort": payload.get("sort", "relevancia" if modo == "texto" else "desc"),
+        "paginacion": _paginacion_from_payload(payload),
+        "subBusqueda": "",
+        "tipoAcciones": payload.get("tipoAcciones") or [],
+        "decisiones": payload.get("decisiones") or [],
+        "formaTerminacion": payload.get("formaTerminacion") or [],
+        "resolucion": payload.get("resolucion") or [],
+        "jueces": payload.get("jueces") or [],
+        "fechaDecision": payload.get("fechaDecision") or "",
+        "legitimados": payload.get("legitimados") or "",
+    }
+    return base
+
+
+def _buscar_juriscopio_http(payload: Dict[str, Any]) -> Dict[str, Any]:
+    seccion = (payload.get("seccion") or payload.get("tab") or "causas").lower()
+    modo = (payload.get("modo") or payload.get("tipo") or "texto").lower()
+    texto = (payload.get("texto") or payload.get("query") or payload.get("texto_general") or "").strip()
+    numero = (payload.get("numero") or payload.get("numero_caso") or payload.get("numSentencia") or "").strip()
+
+    base_url = URLS["juriscopio_base"].rstrip("/")
+    referer_base = f"{base_url}/buscador-externo/principal"
+
+    if seccion in ("causa", "causas", "sentencias/causas"):
+        body = _build_causa_payload(texto, numero, modo, payload)
+        url = f"{base_url}/buscador-causa-juridico/rest/api/causa/buscar"
+        referer = f"{base_url}/buscador-externo/causa/resultado"
+        parser = _map_causa_items
+        etiqueta = "Causas"
+    elif seccion in ("sentencia", "sentencias"):
+        body = _build_sentencia_payload(texto, numero, modo, payload)
+        url = f"{base_url}/buscador-externo/rest/api/sentencia/100_BUSCR_SNTNCIA"
+        referer = f"{referer_base}/resultadoSentencia"
+        parser = _map_sentencia_items
+        etiqueta = "Sentencias"
+    elif seccion in ("seleccion_autos", "autos_seleccion", "autos"):
+        body = _build_seleccion_payload("autos", texto, numero, modo, payload)
+        url = f"{base_url}/buscador-seleccion/rest/api/seleccion/100_BUSCR_SELECCION"
+        referer = f"{referer_base}/resultadoSeleccion"
+        parser = lambda items: _map_seleccion_items(items, "Autos de selección")
+        etiqueta = "Selección - Autos"
+    elif seccion in ("seleccion_casos", "casos_ingresados", "seleccion"):
+        body = _build_seleccion_payload("casos", texto, numero, modo, payload)
+        url = f"{base_url}/buscador-seleccion/rest/api/seleccion/100_BUSCR_SELECCION"
+        referer = f"{referer_base}/resultadoSeleccion"
+        parser = lambda items: _map_seleccion_items(items, "Casos ingresados a selección")
+        etiqueta = "Selección - Casos"
+    elif seccion in ("admision", "admisión"):
+        body = _build_admision_payload(texto, numero, "numero" if modo.startswith("numero") else "texto" if modo.startswith("texto") else modo, payload)
+        url = f"{base_url}/buscador-admision/rest/api/admision/100_BUSCR_ADMISION"
+        referer = f"{referer_base}/resultadoAdmision"
+        parser = _map_admision_items
+        etiqueta = "Admisión"
+    else:
+        return {"error": f"Sección Juriscopio desconocida: {seccion}", "nivel_consulta": "Juriscopio"}
+
+    try:
+        data = _post_juriscopio(url, body, referer)
+        items = data.get("dato") or []
+        parsed = parser(items)
+        total = data.get("totalFilas", len(parsed))
+        return {
+            "mensaje": data.get("mensaje", f"Consulta Juriscopio completada ({etiqueta})."),
+            "nivel_consulta": "Juriscopio",
+            "seccion": etiqueta,
+            "total": total,
+            "resultado": parsed[:MAX_ITEMS]
+        }
+    except Exception as e:
+        return {"error": f"Juriscopio no disponible: {e}", "nivel_consulta": "Juriscopio", "seccion": seccion}
+
+
+def consultar_juriscopio(payload: Dict[str, Any]) -> Dict[str, Any]:
+    texto = (payload.get("texto") or payload.get("query") or payload.get("texto_general") or "").strip()
+    seccion = (payload.get("seccion") or payload.get("tab") or "causas").lower()
+    if not texto and seccion not in ("admision", "admisión") and not payload.get("numero"):
+        return {"error": "Debe proporcionar un texto o número para la consulta.", "nivel_consulta": "Juriscopio"}
+    try:
+        return _buscar_juriscopio_http(payload)
+    except Exception as e:
+        return {"error": f"Error general al consultar Juriscopio: {e}", "nivel_consulta": "Juriscopio"}
