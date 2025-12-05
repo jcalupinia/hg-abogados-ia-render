@@ -9,8 +9,12 @@ import requests
 from PIL import Image
 
 SUPERCIAS_BASE = os.getenv(
-    "SUPERCIA_BASE_URL",
-    "https://appscvsgencm.supercias.gob.ec/consultaCompanias/societario/",
+    "SUPERCIAS_BASE_URL",
+    os.getenv(
+        "SUPERCIA_BASE_URL",
+        # Fallback al dominio móvil (resuelve mejor en algunos entornos)
+        "https://appscvsmovil.supercias.gob.ec/consultaCompanias/societario/",
+    ),
 ).rstrip("/") + "/"
 MAIN_URL = urljoin(SUPERCIAS_BASE, "busquedaCompanias.jsf")
 
