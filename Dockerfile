@@ -15,15 +15,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpangocairo-1.0-0 libpango-1.0-0 libcairo2 \
     libxrandr2 libxkbcommon0 libasound2 libatspi2.0-0 \
     libxshmfence1 libgbm1 fonts-liberation \
-    libcups2 \
+    libcups2 tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 # ---- Directorio de trabajo ----
 WORKDIR /app
 COPY . /app
 
+# ---- Evitar uso de proxy durante el build (pip) ----
+ENV HTTP_PROXY="" \
+    HTTPS_PROXY=""
+
 # ---- Instalar dependencias Python ----
-RUN pip install --no-cache-dir -r requirements.txt
+# Limpia proxies en el paso de build para que pip use la red directa
+RUN unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy && \
+    pip install --no-cache-dir -r requirements.txt
 
 # ---- Instalar Playwright sin dependencias del sistema ----
 RUN python -m playwright install chromium || true
