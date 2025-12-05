@@ -36,6 +36,7 @@ try:
         consultar_procesos_judiciales,
         consultar_juriscopio,
     )
+    from providers.supercias_connectors import consultar_supercias_companias
     from providers.uafe_connector import consultar_uafe
     print("Conectores cargados correctamente.")
 except ModuleNotFoundError as e:
@@ -44,6 +45,7 @@ except ModuleNotFoundError as e:
     consultar_corte_nacional = None
     consultar_procesos_judiciales = None
     consultar_juriscopio = None
+    consultar_supercias_companias = None
     consultar_uafe = None
     print(f"Error al importar conectores: {e}")
 
@@ -138,6 +140,19 @@ async def consult_procesos_judiciales_endpoint(payload: dict):
         return await run_in_threadpool(consultar_procesos_judiciales, payload)
     except Exception as e:
         traceback.print_exc()
+
+# ============================================
+# Consulta Superintendencia de Compa??as (compa??as)
+# ============================================
+@app.post("/consult_supercias_companias")
+async def consult_supercias_companias_endpoint(payload: dict):
+    if not consultar_supercias_companias:
+        raise HTTPException(status_code=500, detail="Conector Supercias no disponible.")
+    try:
+        return await run_in_threadpool(consultar_supercias_companias, payload)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error Supercias: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error Procesos Judiciales: {str(e)}")
 
 # ============================================
