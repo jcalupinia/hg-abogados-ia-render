@@ -1,272 +1,404 @@
+"""
+Conector HTTP para FielWeb Plus (sin Playwright).
+
+Flujo:
+1) POST /Cuenta/login.aspx/signin      -> establece cookies de sesión
+2) POST /Cuenta/login.aspx/aceptoTerminosCondiciones
+3) POST /Cuenta/login.aspx/traerUsuario -> obtiene token (tk)
+4) POST /app/tpl/buscador/busquedas.aspx/buscar -> resultados
+
+Para cada resultado se devuelven los campos visibles en la tarjeta y, si existe,
+se arma una URL de previsualización del Registro Oficial (RO) usando los datos
+de `registroOficialImagen.Url`. La descarga PDF se realiza en el front con
+`/app/tpl/visualizador/visualizador.aspx/generarPDF`; se deja expuesto el
+endpoint para usos posteriores.
+"""
+
 import os
-import asyncio
-from typing import List, Dict, Any, Optional
-from urllib.parse import urljoin
-from playwright.async_api import async_playwright, TimeoutError as PWTimeout
+import base64
+import requests
+from typing import Any, Dict, List, Optional
+from urllib.parse import urljoin, parse_qs
 
-# ================================
-# ⚙️ CONFIGURACIÓN GLOBAL
-# ================================
-DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+FIELWEB_BASE = os.getenv("FIELWEB_BASE_URL", "https://www.fielweb.com").rstrip("/")
+FIELWEB_LOGIN_URL = os.getenv("FIELWEB_LOGIN_URL", f"{FIELWEB_BASE}/Cuenta/Login.aspx")
+FIELWEB_USERNAME = os.getenv("FIELWEB_USERNAME", "").strip()
+FIELWEB_PASSWORD = os.getenv("FIELWEB_PASSWORD", "").strip()
 
-def debug_log(msg: str):
-    if DEBUG:
-        print(f"[DEBUG] {msg}")
+DEFAULT_REFORMAS = "2"  # pestaña "Todo" en el front
+DEFAULT_SECCION = 1     # s=1 observado en búsquedas
+DEFAULT_PAGE = 1
 
-# ================================
-# 🧩 Compatibilidad con Render
-# ================================
-def aplicar_nest_asyncio_si_es_necesario():
-    """Permite compatibilidad entre Render y entornos locales"""
+
+def _session() -> requests.Session:
+    s = requests.Session()
+    s.headers.update(
+        {
+            "User-Agent": "Mozilla/5.0 (H&G Abogados IA)",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Content-Type": "application/json; charset=UTF-8",
+            "Origin": FIELWEB_BASE,
+            "Referer": FIELWEB_LOGIN_URL,
+        }
+    )
+    return s
+
+
+def _post_json(sess: requests.Session, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    url = path if path.startswith("http") else urljoin(FIELWEB_BASE, path)
+    resp = sess.post(url, json=payload, timeout=30)
+    resp.raise_for_status()
     try:
-        import nest_asyncio
-        loop = asyncio.get_event_loop()
-        if "uvloop" not in str(type(loop)).lower():
-            nest_asyncio.apply()
-            debug_log("nest_asyncio aplicado correctamente (modo local).")
-        else:
-            debug_log("uvloop detectado, no se aplica nest_asyncio (modo Render).")
-    except Exception as e:
-        print(f"⚠️ No se aplicó nest_asyncio: {e}")
-
-aplicar_nest_asyncio_si_es_necesario()
-
-# ================================
-# 🔐 CONFIGURACIÓN DESDE ENTORNO
-# ================================
-FIELWEB_URL = os.getenv("FIELWEB_LOGIN_URL", "https://www.fielweb.com/Cuenta/Login.aspx").strip()
-USERNAME = os.getenv("FIELWEB_USERNAME", "consultor@hygabogados.ec").strip()
-PASSWORD = os.getenv("FIELWEB_PASSWORD", "").strip()
-
-PAGE_TIMEOUT_MS = 30_000
-NAV_TIMEOUT_MS = 35_000
-MAX_ITEMS = 10
-
-# ================================
-# Proxy opcional desde entorno
-# ================================
-def _proxy_config() -> Optional[dict]:
-    """
-    Construye la configuración de proxy si se definen:
-    HTTP_PROXY/HTTPS_PROXY (server) y HTTP_PROXY_USER/HTTP_PROXY_PASS (auth opcional).
-    """
-    proxy = os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
-    if not proxy:
-        return None
-    cfg = {"server": proxy}
-    user = os.getenv("HTTP_PROXY_USER")
-    pwd = os.getenv("HTTP_PROXY_PASS")
-    if user:
-        cfg["username"] = user
-        if pwd:
-            cfg["password"] = pwd
-    return cfg
-
-# ================================
-# 🔧 SELECTORES ADAPTATIVOS
-# ================================
-LOGIN_SELECTORS = {
-    # Nuevos ids detectados en la pantalla actual de login (fielweb plus) y algunos comodines
-    "user": [
-        '#username-input', '#usuario',
-        'input[name="usuario"]', 'input[placeholder*="Usuario"]', 'input[id*="txtUsuario"]',
-        'input[name*="username"]', 'input[id*="username"]', 'input[id*="user"]'
-    ],
-    "password": [
-        '#password-input', '#clave',
-        'input[name="clave"]', 'input[placeholder*="Clave"]', 'input[id*="txtClave"]',
-        'input[type="password"]', 'input[name*="password"]', 'input[id*="password"]'
-    ],
-    "submit": [
-        '#entrar-button', '#btnEntrar',
-        'button:has-text("Entrar")', 'input[value="Entrar"]', 'button[type="submit"]',
-        '#ctl00_ContentPlaceHolder1_btnIngresar', 'button[id*="entrar"]'
-    ]
-}
-
-SEARCH_SELECTORS = {
-    "query": ['input[id*="txtBuscar"]', 'input[placeholder*="Buscar"]', 'input[name*="txtBuscar"]'],
-    "submit": ['button:has-text("Buscar")', '#ctl00_ContentPlaceHolder1_btnBuscar', 'button[type="submit"]']
-}
-
-RESULT_ITEM_SELECTORS = [".resultadoItem", ".card-body", "div.resultado", "div.search-result"]
-TITLE_CANDIDATES = ["h3", "h2", "a.title", ".titulo", "a"]
-DOWNLOAD_FILTERS = ["pdf", "word", "docx"]
-LABEL_CONCORDANCIAS = ["Concordancia", "Concordancias"]
-LABEL_JURIS = ["Jurisprudencia", "Sentencia", "Jurisprudencias", "Sentencias"]
-
-# ================================
-# 🔍 UTILIDADES INTERNAS
-# ================================
-async def _first_selector(page, selectors: List[str]) -> Optional[str]:
-    for sel in selectors:
-        try:
-            if await page.query_selector(sel):
-                return sel
-        except Exception:
-            continue
-    return None
-
-async def _wait_first_selector(page, selectors: List[str], timeout_ms: int = 4000) -> Optional[str]:
-    """
-    Espera secuencialmente el primer selector disponible.
-    Útil cuando el DOM tarda en construir los campos de login.
-    """
-    for sel in selectors:
-        try:
-            await page.wait_for_selector(sel, timeout=timeout_ms, state="visible")
-            return sel
-        except Exception:
-            continue
-    return None
-def _classify_link(texto: str) -> str:
-    t = texto.lower()
-    if any(k in t for k in DOWNLOAD_FILTERS): return "descarga"
-    if any(k in t for k in LABEL_CONCORDANCIAS): return "concordancia"
-    if any(k in t for k in LABEL_JURIS): return "jurisprudencia"
-    return "otro"
-
-# ================================
-# 🔐 LOGIN UNIVERSAL
-# ================================
-async def _login(page, url: str, user: str, password: str):
-    debug_log(f"Iniciando sesión en {url}")
-    resp = await page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
-
-    # Si la respuesta es 4xx/5xx, devolvemos un error claro para evitar seguir esperando selectores
-    try:
-        status = resp.status if resp else None
-        if status and status >= 400:
-            raise RuntimeError(f"Login FielWeb devolvió HTTP {status} (posible bloqueo/captcha).")
+        data = resp.json()
     except Exception:
-        pass
+        raise RuntimeError(f"Respuesta no JSON desde {url}")
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Respuesta inesperada desde {url}")
+    return data
 
-    user_sel = await _wait_first_selector(page, LOGIN_SELECTORS["user"])
-    pass_sel = await _wait_first_selector(page, LOGIN_SELECTORS["password"])
-    subm_sel = await _wait_first_selector(page, LOGIN_SELECTORS["submit"])
 
-    if not all([user_sel, pass_sel, subm_sel]):
-        title = ""
-        try:
-            title = await page.title()
-        except Exception:
-            title = ""
-        raise RuntimeError(f"Campos de login no encontrados (posible cambio en FielWeb). URL={page.url} title='{title}'")
+def _login_and_token(sess: requests.Session) -> str:
+    if not FIELWEB_USERNAME or not FIELWEB_PASSWORD:
+        raise RuntimeError("Faltan credenciales FIELWEB_USERNAME/FIELWEB_PASSWORD.")
 
-    await page.fill(user_sel, user)
-    await page.fill(pass_sel, password)
-    await page.click(subm_sel)
+    signin_payload = {"u": FIELWEB_USERNAME, "c": FIELWEB_PASSWORD, "r": False, "aQS": False}
+    data = _post_json(sess, "/Cuenta/login.aspx/signin", signin_payload)
+    if not data.get("d", {}).get("Respuesta", True):
+        raise RuntimeError(f"Login FielWeb falló: {data}")
 
-    try:
-        await page.wait_for_load_state("networkidle", timeout=NAV_TIMEOUT_MS)
-    except PWTimeout:
-        debug_log("Timeout leve al iniciar sesión, continuando...")
-        await page.wait_for_timeout(2000)
+    _post_json(sess, "/Cuenta/login.aspx/aceptoTerminosCondiciones", {"u": FIELWEB_USERNAME})
 
-# ================================
-# 🔎 BÚSQUEDA Y EXTRACCIÓN
-# ================================
-async def _buscar(page, texto: str):
-    debug_log(f"Buscando en FielWeb: {texto}")
-    q_sel = await _first_selector(page, SEARCH_SELECTORS["query"])
-    b_sel = await _first_selector(page, SEARCH_SELECTORS["submit"])
-    if not all([q_sel, b_sel]):
-        raise RuntimeError("No se encontraron los controles de búsqueda.")
+    usuario = _post_json(sess, "/Cuenta/login.aspx/traerUsuario", {})
+    token = usuario.get("d", {}).get("Data", {}).get("token")
+    if not token:
+        raise RuntimeError("No se obtuvo token desde traerUsuario.")
+    return token
 
-    await page.fill(q_sel, texto)
-    await page.click(b_sel)
-    try:
-        await page.wait_for_load_state("networkidle", timeout=NAV_TIMEOUT_MS)
-    except PWTimeout:
-        await page.wait_for_timeout(2000)
 
-    resultados = []
-    for sel in RESULT_ITEM_SELECTORS:
-        nodes = await page.query_selector_all(sel)
-        if nodes:
-            for node in nodes[:MAX_ITEMS]:
-                title = (await node.inner_text()).split("\n")[0].strip()
-                links = await node.query_selector_all("a")
-                enlaces = []
-                for a in links:
-                    href = (await a.get_attribute("href")) or ""
-                    text = (await a.inner_text()) or ""
-                    tipo = _classify_link(text)
-                    if href:
-                        enlaces.append({
-                            "tipo": tipo,
-                            "texto": text.strip() or "enlace",
-                            "url": urljoin(page.url, href)
-                        })
-                resultados.append({"titulo": title, "enlaces": enlaces})
-            break
-    return resultados
+def _build_ro_links(reg_img: Optional[Dict[str, Any]]) -> Dict[str, Optional[str]]:
+    """Construye URL de visor RO a partir de registroOficialImagen.Url (&nav=...&tpag=...&pag=...)."""
+    if not reg_img:
+        return {"preview_url": None, "nav": None, "tpag": None, "pag": None}
 
-# ================================
-# 🚀 CONSULTA PRINCIPAL ASÍNCRONA
-# ================================
-async def _buscar_en_fielweb_async(texto: str) -> Dict[str, Any]:
-    if not all([FIELWEB_URL, USERNAME, PASSWORD]):
-        raise RuntimeError("Faltan variables de entorno para FielWeb (URL, usuario o contraseña).")
+    raw = (reg_img.get("Url") or "").lstrip("&")
+    qs = parse_qs(raw)
+    nav = qs.get("nav", [None])[0]
+    tpag = qs.get("tpag", [None])[0]
+    pag = qs.get("pag", [None])[0]
+    preview = None
+    if nav and tpag and pag:
+        preview = f"{FIELWEB_BASE}/app/tpl/visualizador/visualizador.aspx?t=3&nav={nav}&tpag={tpag}&pag={pag}"
+    return {"preview_url": preview, "nav": nav, "tpag": tpag, "pag": pag}
 
-    # Configuración del navegador compatible con Render
-    launch_args = [
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--disable-setuid-sandbox",
-        "--disable-web-security"
-    ]
 
-    proxy_cfg = _proxy_config()
-    if proxy_cfg:
-        debug_log(f"Usando proxy: {proxy_cfg.get('server')}")
-
-    debug_log("Lanzando navegador Playwright Chromium...")
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=launch_args, proxy=proxy_cfg)
-        context = await browser.new_context()
-        page = await context.new_page()
-        page.set_default_timeout(PAGE_TIMEOUT_MS)
-
-        try:
-            await _login(page, FIELWEB_URL, USERNAME, PASSWORD)
-            await page.wait_for_timeout(2500)
-            data = await _buscar(page, texto)
-            return {"mensaje": f"Resultados para '{texto}'", "nivel_consulta": "FielWeb", "resultado": data}
-        except Exception as e:
-            return {"error": f"Error interno en la búsqueda: {e}", "nivel_consulta": "FielWeb"}
-        finally:
-            await context.close()
-            await browser.close()
-            debug_log("Chromium cerrado correctamente.")
-
-# ================================
-# ⚙️ UTILIDAD DE EJECUCIÓN BLOQUEANTE
-# ================================
-def _run_async_blocking(coro):
+def _download_pdf(
+    sess: requests.Session,
+    nav: Optional[str],
+    tpag: Optional[str],
+    pag: Optional[str],
+    titulo: Optional[str],
+) -> Optional[Dict[str, Any]]:
     """
-    Ejecuta la corrutina en un bucle nuevo y aislado para evitar conflictos con uvloop/nest_asyncio.
+    Descarga el PDF usando el flujo del front:
+    1) GET visualizador.aspx?t=3&nav=...&tpag=...&pag=...
+    2) POST generarPDF con el HTML devuelto.
+    Retorna un dict con pdf_base64 y tamaño en bytes, o None si falla.
     """
-    loop = asyncio.new_event_loop()
-    try:
-        asyncio.set_event_loop(loop)
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
-        asyncio.set_event_loop(None)
+    if not (nav and tpag and pag):
+        return None
 
-# ================================
-# 🧠 INTERFAZ SINCRÓNICA PARA FASTAPI
-# ================================
+    preview_url = f"{FIELWEB_BASE}/app/tpl/visualizador/visualizador.aspx?t=3&nav={nav}&tpag={tpag}&pag={pag}"
+    try:
+        resp_view = sess.get(preview_url, timeout=30)
+        resp_view.raise_for_status()
+        html = resp_view.text
+    except Exception:
+        return None
+
+    payload = {
+        "concordancias": False,
+        "contenido": html,
+        "desde": None,
+        "hasta": None,
+        "idCarga": None,
+        "idNormas": [],
+        "textoAdicional": None,
+        "titulo": titulo or f"{nav}".replace("/", ""),
+    }
+    try:
+        pdf_resp = sess.post(
+            f"{FIELWEB_BASE}/app/tpl/visualizador/visualizador.aspx/generarPDF",
+            json=payload,
+            timeout=60,
+        )
+        pdf_resp.raise_for_status()
+        pdf_bytes = pdf_resp.content
+        return {
+            "pdf_base64": base64.b64encode(pdf_bytes).decode("ascii"),
+            "pdf_size": len(pdf_bytes),
+        }
+    except Exception:
+        return None
+
+
+def _generar_doc(
+    sess: requests.Session,
+    norma_id: int,
+    titulo: str,
+    concordancias: bool,
+    formato: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Genera ruta de descarga para PDF/Word/HTML usando los endpoints generarPDF/generarDOC/generarHTML.
+    formato: "pdf" | "word" | "html"
+    Retorna dict con ruta y url_iframe para descarga directa.
+    """
+    endpoints = {
+        "pdf": "/app/tpl/visualizador/visualizador.aspx/generarPDF",
+        "word": "/app/tpl/visualizador/visualizador.aspx/generarDOC",
+        "html": "/app/tpl/visualizador/visualizador.aspx/generarHTML",
+    }
+    tipo_archivo_map = {"pdf": "1", "word": "2", "html": "3"}
+    ep = endpoints.get(formato.lower())
+    if not ep:
+        return None
+    payload = {
+        "contenido": "",
+        "titulo": f"{norma_id} - {titulo}",
+        "idNormas": [norma_id],
+        "concordancias": bool(concordancias),
+        "idCarga": None,
+        "textoAdicional": "<b>Última Reforma: </b>(No reformado)",
+        "desde": None,
+        "hasta": None,
+    }
+    try:
+        resp = _post_json(sess, ep, payload)
+        ruta = resp.get("d", {}).get("Data")
+        if not ruta:
+            return None
+        # iframe de descarga directa
+        ruta_enc = ruta.replace("\\", "\\\\")
+        download_url = (
+            f"{FIELWEB_BASE}/Clases/iFrameDescarga.aspx?"
+            f"ArchivoDescarga={ruta}&TipoArchivo={tipo_archivo_map[formato.lower()]}"
+        )
+        return {"ruta": ruta_enc, "download_url": download_url}
+    except Exception:
+        return None
+
+
+def _map_result(item: Dict[str, Any], descargar_pdf: bool, sess: requests.Session) -> Dict[str, Any]:
+    ro_info = _build_ro_links(item.get("registroOficialImagen") or {})
+    pdf_info = None
+    if descargar_pdf:
+        pdf_info = _download_pdf(
+            sess,
+            ro_info.get("nav"),
+            ro_info.get("tpag"),
+            ro_info.get("pag"),
+            item.get("registroOficialImagen", {}).get("NombreResultados") or item.get("fuente"),
+        )
+    return {
+        "area_principal": item.get("area"),
+        "tipo_documento": item.get("tipoDocumento"),
+        "numero": item.get("numero"),
+        "titulo": item.get("titulo"),
+        "tipo_publicacion": item.get("tipoPublicacion"),
+        "fecha_publicacion": item.get("fechaPublicacion"),
+        "fecha_emision": item.get("fechaExpedicion"),
+        "derogado": item.get("derogado"),
+        "emisor": item.get("emisor"),
+        "fuente": item.get("fuente"),
+        "norma_id": item.get("normaID"),
+        "aciertos": item.get("aciertos"),
+        "registro_oficial": {
+            "titulo": item.get("registroOficialImagen", {}).get("NombreResultados") or item.get("fuente"),
+            "raw_url": item.get("registroOficialImagen", {}).get("Url"),
+            **ro_info,
+            # Endpoint de descarga PDF: requiere POST con HTML (payload observado en generarPDF)
+            "download_endpoint": f"{FIELWEB_BASE}/app/tpl/visualizador/visualizador.aspx/generarPDF",
+            "pdf": pdf_info,
+        },
+        "descargas": {
+            # generamos rutas on-demand en consultar_fielweb cuando se pide descargar_pdf
+        },
+        "cita": _build_citation(item),
+    }
+
+
+def _build_citation(item: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    """
+    Construye un texto de cita y una URL básica a la norma.
+    """
+    norma_id = item.get("normaID")
+    titulo = item.get("titulo") or ""
+    numero = item.get("numero") or ""
+    fuente = item.get("fuente") or ""
+    fecha_pub = item.get("fechaPublicacion") or ""
+    emisor = item.get("emisor") or ""
+
+    partes = []
+    if titulo:
+        partes.append(titulo)
+    if numero:
+        partes.append(f"({numero})")
+    if fuente or fecha_pub:
+        partes.append(f"({fuente} {fecha_pub})".strip())
+    if emisor:
+        partes.append(emisor)
+    texto = ". ".join([p for p in partes if p]).strip()
+
+    url = None
+    if norma_id:
+        url = f"{FIELWEB_BASE}/Index.aspx?nid={norma_id}#norma/{norma_id}"
+
+    return {"texto": texto, "url": url}
+
+
+def _buscar(
+    sess: requests.Session,
+    token: str,
+    texto: str,
+    seccion: int,
+    reformas: str,
+    page: int,
+    descargar_pdf: bool,
+    incluir_descargas: bool,
+) -> Dict[str, Any]:
+    payload = {
+        "tk": token,
+        "s": seccion,
+        "t": texto,
+        "p": page,
+        "reformas": reformas,
+        "ed": "",
+        "eh": "",
+        "pd": "",
+        "ph": "",
+        "c": None,
+        "d": None,
+        "la": [],
+        "lac": [],
+        "ld": [],
+        "lr": [],
+        "ls": [],
+    }
+    data = _post_json(sess, "/app/tpl/buscador/busquedas.aspx/buscar", payload)
+    resultado = data.get("d", {}).get("Data") or []
+    mapped = [_map_result(r, descargar_pdf, sess) for r in resultado]
+
+    if incluir_descargas:
+        for idx, r in enumerate(resultado):
+            norma_id = r.get("normaID")
+            titulo = r.get("titulo") or ""
+            if not norma_id:
+                continue
+            try:
+                nid = int(norma_id)
+            except Exception:
+                continue
+            # Construir descargas para pdf/word/html con y sin concordancias
+            for fmt in ("pdf", "word", "html"):
+                sin = _generar_doc(sess, nid, titulo, False, fmt)
+                con = _generar_doc(sess, nid, titulo, True, fmt)
+                key_sin = f"{fmt}_sin"
+                key_con = f"{fmt}_con"
+                mapped[idx].setdefault("descargas", {})[key_sin] = sin
+                mapped[idx].setdefault("descargas", {})[key_con] = con
+    return {
+        "mensaje": f"Resultados para '{texto}'",
+        "nivel_consulta": "FielWeb",
+        "texto": texto,
+        "seccion": seccion,
+        "reformas": reformas,
+        "pagina": page,
+        "resultado": mapped,
+    }
+
+
+def _traer_detalle_norma(sess: requests.Session, norma_id: int) -> Optional[Dict[str, Any]]:
+    try:
+        data = _post_json(sess, "/app/tpl/norma/norma.aspx/traerDetalleNorma", {"idNorma": norma_id})
+        return data.get("d", {}).get("Data")
+    except Exception:
+        return None
+
+
+def _traer_parte_norma(
+    sess: requests.Session, norma_id: int, d_value: Optional[int], h_value: Optional[int]
+) -> Optional[List[Dict[str, Any]]]:
+    if d_value is None or h_value is None:
+        return None
+    try:
+        data = _post_json(
+            sess,
+            "/app/tpl/norma/norma.aspx/traerParteNorma",
+            {"id": norma_id, "d": d_value, "h": h_value},
+        )
+        return data.get("d", {}).get("Data")
+    except Exception:
+        return None
+
+
 def consultar_fielweb(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Parámetros de entrada:
+      - texto / consulta: término de búsqueda (obligatorio)
+      - seccion / s: número de sección (opcional, por defecto 1)
+      - reformas: pestaña (opcional, por defecto "2" = Todo)
+      - page / pag: página (opcional, por defecto 1)
+      - descargar_pdf (bool, opcional): si True, intenta generar y devolver pdf_base64 por cada resultado con RO.
+      - norma_id (opcional): si se envía, devolver detalle de norma (traerDetalleNorma)
+      - parte_d / parte_h (opcionales): si se envían junto a norma_id, traerParteNorma y devolver la lista de textos.
+      - descargas (bool, opcional): si True, devuelve rutas y URLs de descarga (pdf/word/html con/sin concordancias).
+    """
     texto = (payload.get("texto") or payload.get("consulta") or "").strip()
     if not texto:
-        return {"error": "Debe proporcionar un texto de búsqueda en 'texto' o 'consulta'."}
+        return {"error": "Debe proporcionar 'texto' o 'consulta'."}
 
     try:
-        return _run_async_blocking(_buscar_en_fielweb_async(texto))
-    except PWTimeout as te:
-        return {"error": f"Tiempo de espera agotado: {te}", "nivel_consulta": "FielWeb"}
+        seccion = int(payload.get("seccion") or payload.get("s") or DEFAULT_SECCION)
+    except Exception:
+        seccion = DEFAULT_SECCION
+    reformas = str(payload.get("reformas") or DEFAULT_REFORMAS)
+    try:
+        page = int(payload.get("page") or payload.get("pag") or DEFAULT_PAGE)
+    except Exception:
+        page = DEFAULT_PAGE
+
+    descargar_pdf = bool(payload.get("descargar_pdf") or False)
+    incluir_descargas = bool(payload.get("descargas") or False)
+
+    try:
+        sess = _session()
+        token = _login_and_token(sess)
+        base = _buscar(sess, token, texto, seccion, reformas, page, descargar_pdf, incluir_descargas)
+
+        # Opcional: traer detalle y parte de norma si se solicita
+        norma_id = payload.get("norma_id") or payload.get("id_norma")
+        if norma_id:
+            try:
+                norma_id_int = int(norma_id)
+                detalle = _traer_detalle_norma(sess, norma_id_int)
+                parte_d = payload.get("parte_d")
+                parte_h = payload.get("parte_h")
+                parte = None
+                try:
+                    if parte_d is not None and parte_h is not None:
+                        parte = _traer_parte_norma(sess, norma_id_int, int(parte_d), int(parte_h))
+                except Exception:
+                    parte = None
+                base["norma_detalle"] = detalle
+                if parte is not None:
+                    base["norma_parte"] = parte
+            except Exception:
+                base["norma_detalle"] = {"error": "No se pudo obtener detalle de norma"}
+        return base
+    except requests.HTTPError as e:
+        return {
+            "error": f"HTTP {e.response.status_code} en FielWeb: {e.response.text}",
+            "nivel_consulta": "FielWeb",
+        }
     except Exception as e:
-        return {"error": f"Error general al consultar FielWeb: {e}", "nivel_consulta": "FielWeb"}
+        return {"error": f"Error FielWeb: {e}", "nivel_consulta": "FielWeb"}
