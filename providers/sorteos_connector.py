@@ -76,57 +76,84 @@ def buscar_sorteos(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": f"Error al buscar sorteos: {e}"}
 
 
+def _map_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": doc.get("id"),
+        "nombre": doc.get("nombreDocumento") or doc.get("nombre"),
+        "carpeta": doc.get("carpeta"),
+        "uuid": doc.get("uuid"),
+        "uuidDocumento": doc.get("uuidDocumento"),
+        "fecha_carga": doc.get("fechaCarga"),
+        "repositorio": doc.get("repositorio"),
+        "url": doc.get("uuid") or doc.get("uuidDocumento"),
+    }
+
+
 def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Requiere causa_id (id numérico del resultado). Devuelve documentos/anexos con URLs.
+    Requiere causa_id (id num�rico del resultado) y opcional numero_causa.
+    Devuelve la ficha de la causa y, si se solicita, los documentos/anexos.
     """
     causa_id = payload.get("causa_id") or payload.get("id") or payload.get("causaId")
+    numero_causa = payload.get("numero_causa") or payload.get("numeroCausa") or ""
+    incluir_docs = payload.get("documentos") or payload.get("anexos") or payload.get("incluir_documentos")
+
     if not causa_id:
         return {"error": "Debe proporcionar causa_id"}
 
-    body = {"id": causa_id}
+    ficha_body = {
+        "numeroCausa": numero_causa,
+        "idCausa": causa_id,
+        "uid": "",
+        "contexto": "CAUSA",
+    }
+
     sess = _session(DETALLE_BASE_URL)
     try:
-        resp = sess.post(
-            f"{DETALLE_BASE_URL}/buscador-externo/rest/api/expedienteDocumento/100_EXPEDIENTE_DCMTO",
-            json={"dato": _b64_payload(body)},
+        ficha_resp = sess.post(
+            f"{DETALLE_BASE_URL}/buscador-causa-juridico/rest/api/causa/obtenerFicha",
+            json={"dato": _b64_payload(ficha_body)},
             timeout=30,
         )
-        resp.raise_for_status()
-        data = resp.json()
-        items = data.get("dato") or []
-
-        def _map_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
-            return {
-                "id": doc.get("id"),
-                "nombre": doc.get("nombreDocumento"),
-                "carpeta": doc.get("carpeta"),
-                "uuid": doc.get("uuid"),
-                "uuidDocumento": doc.get("uuidDocumento"),
-                "fecha_carga": doc.get("fechaCarga"),
-                "repositorio": doc.get("repositorio"),
-            }
-
-        documentos: List[Dict[str, Any]] = []
-        anexos: List[Dict[str, Any]] = []
-        for doc in items:
-            documentos.append(_map_doc(doc))
-            for an in doc.get("anexos") or []:
-                anexos.append(_map_doc(an))
-
-        return {
-            "mensaje": data.get("mensaje"),
-            "documentos": documentos,
-            "anexos": anexos,
+        ficha_resp.raise_for_status()
+        ficha_data = ficha_resp.json()
+        result: Dict[str, Any] = {
+            "mensaje": ficha_data.get("mensaje"),
+            "ficha": ficha_data.get("dato"),
         }
+
+        # Si el cliente solicita documentos, intentar obtenerlos.
+        if incluir_docs:
+            try:
+                doc_resp = sess.post(
+                    f"{DETALLE_BASE_URL}/buscador-causa-juridico/rest/api/expedienteDocumento/100_EXPEDIENTE_DCMTO",
+                    json={"dato": _b64_payload({"id": causa_id})},
+                    timeout=30,
+                )
+                doc_resp.raise_for_status()
+                doc_data = doc_resp.json()
+                items = doc_data.get("dato") or []
+                documentos: List[Dict[str, Any]] = []
+                anexos: List[Dict[str, Any]] = []
+                for doc in items:
+                    documentos.append(_map_doc(doc))
+                    for an in doc.get("anexos") or []:
+                        anexos.append(_map_doc(an))
+                result["documentos"] = documentos
+                result["anexos"] = anexos
+            except Exception:
+                # No fallar toda la llamada por documentos
+                result.setdefault("incidencias", []).append("No se pudieron obtener documentos")
+
+        return result
     except Exception as e:
         return {"error": f"Error al obtener detalle de expediente: {e}"}
 
 
 def consultar_sorteos(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Si el payload incluye 'detalle' o 'causa_id', devuelve documentos del expediente.
-    De lo contrario, realiza la búsqueda principal.
+    Si el payload incluye 'detalle' o 'causa_id', devuelve detalle de la causa.
+    De lo contrario, realiza la b�squeda principal.
     """
     if payload.get("detalle") or payload.get("causa_id"):
         return detalle_expediente(payload)
