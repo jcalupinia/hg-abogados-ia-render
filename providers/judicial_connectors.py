@@ -45,6 +45,9 @@ URLS = {
     "corte_nacional": os.getenv("CORTE_NACIONAL_URL", "https://busquedasentencias.cortenacional.gob.ec/").strip(),
     "procesos_judiciales": os.getenv("PROCESOS_JUDICIALES_URL", "https://procesosjudiciales.funcionjudicial.gob.ec/busqueda").strip(),
     "juriscopio_base": os.getenv("JURISCOPIO_BASE", "https://buscador.corteconstitucional.gob.ec").strip(),
+    "procesos_api": "https://api.funcionjudicial.gob.ec/EXPEL-CONSULTA-CAUSAS-SERVICE/api/consulta-causas",
+    "procesos_api_clex": "https://api.funcionjudicial.gob.ec/EXPEL-CONSULTA-CAUSAS-CLEX-SERVICE/api/consulta-causas-clex",
+    "procesos_resueltos_api": "https://api.funcionjudicial.gob.ec/MANTICORE-SERVICE/api/manticore/consulta",
 }
 
 PAGE_TIMEOUT_MS = 30_000
@@ -1049,3 +1052,244 @@ def consultar_juriscopio(payload: Dict[str, Any]) -> Dict[str, Any]:
         return _buscar_juriscopio_http(payload)
     except Exception as e:
         return {"error": f"Error general al consultar Juriscopio: {e}", "nivel_consulta": "Juriscopio"}
+
+
+# ============================================================
+# Procesos Judiciales - Búsqueda avanzada (API directa)
+# ============================================================
+def _headers_procesos_api() -> Dict[str, str]:
+    return {
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "Accept-Language": "es-419,es;q=0.9",
+        "Origin": "https://procesosjudiciales.funcionjudicial.gob.ec",
+        "Referer": "https://procesosjudiciales.funcionjudicial.gob.ec/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, como Gecko) Chrome/143.0.0.0 Safari/537.36",
+    }
+
+
+def _buscar_causas_avanzado(filtros: Dict[str, Any], page: int = 1, size: int = 10) -> Dict[str, Any]:
+    body = {
+        "actor": {
+            "cedulaActor": filtros.get("cedula_actor", ""),
+            "nombreActor": filtros.get("nombre_actor", ""),
+        },
+        "demandado": {
+            "cedulaDemandado": filtros.get("cedula_demandado", ""),
+            "nombreDemandado": filtros.get("nombre_demandado", ""),
+        },
+        "first": 1,
+        "numeroCausa": filtros.get("numero_causa", ""),
+        "numeroFiscalia": filtros.get("numero_fiscalia", ""),
+        "pageSize": size,
+        "provincia": filtros.get("provincia", ""),
+        "recaptcha": filtros.get("recaptcha") or os.getenv("PJ_RECAPTCHA_TOKEN") or "verdad",
+    }
+    headers = _headers_procesos_api()
+    cookie = os.getenv("PJ_COOKIE")
+    if cookie:
+        headers["Cookie"] = cookie
+
+    url = f"{URLS['procesos_api']}/informacion/buscarCausas"
+    params = {"page": page, "size": size}
+    resp = requests.post(url, json=body, params=params, headers=headers, timeout=25)
+    resp.raise_for_status()
+    items = resp.json() or []
+    mapped = []
+    for it in items:
+        mapped.append(
+            {
+                "id": it.get("id"),
+                "idJuicio": it.get("idJuicio"),
+                "numero_causa": it.get("idJuicio"),
+                "estado": it.get("estadoActual"),
+                "materia": it.get("nombreMateria"),
+                "tipo_accion": it.get("nombreTipoAccion"),
+                "delito": it.get("nombreDelito"),
+                "fecha_ingreso": _norm_fecha(it.get("fechaIngreso")),
+                "tiene_documento": it.get("iedocumentoAdjunto"),
+            }
+        )
+    return {"resultado": mapped}
+
+
+def _get_informacion_juicio(id_juicio: str) -> Dict[str, Any]:
+    headers = _headers_procesos_api()
+    cookie = os.getenv("PJ_COOKIE")
+    if cookie:
+        headers["Cookie"] = cookie
+    url = f"{URLS['procesos_api']}/informacion/getInformacionJuicio/{id_juicio}"
+    resp = requests.get(url, headers=headers, timeout=25)
+    resp.raise_for_status()
+    return resp.json() or {}
+
+
+def _get_incidente_judicatura(id_juicio: str) -> List[Dict[str, Any]]:
+    headers = _headers_procesos_api()
+    cookie = os.getenv("PJ_COOKIE")
+    if cookie:
+        headers["Cookie"] = cookie
+    url = f"{URLS['procesos_api_clex']}/informacion/getIncidenteJudicatura/{id_juicio}"
+    resp = requests.get(url, headers=headers, timeout=25)
+    resp.raise_for_status()
+    return resp.json() or []
+
+
+def _get_actuaciones(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    headers = _headers_procesos_api()
+    cookie = os.getenv("PJ_COOKIE")
+    if cookie:
+        headers["Cookie"] = cookie
+    url = f"{URLS['procesos_api']}/informacion/actuacionesJudiciales"
+    resp = requests.post(url, json=payload, headers=headers, timeout=25)
+    resp.raise_for_status()
+    return resp.json() or []
+
+
+def _existe_ingreso_directo(id_juicio: str, id_movimiento: int) -> Dict[str, Any]:
+    headers = _headers_procesos_api()
+    cookie = os.getenv("PJ_COOKIE")
+    if cookie:
+        headers["Cookie"] = cookie
+    url = f"{URLS['procesos_api_clex']}/informacion/existeIngresoDirecto"
+    body = {"idJuicio": id_juicio, "idMovimientoJuicioIncidente": id_movimiento}
+    resp = requests.post(url, json=body, headers=headers, timeout=20)
+    resp.raise_for_status()
+    return resp.json() or {}
+
+
+def consultar_procesos_avanzada(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Búsqueda avanzada en procesosjudiciales.funcionjudicial.gob.ec (API directa).
+    Campos: numero_causa, cedula_actor, nombre_actor, cedula_demandado, nombre_demandado,
+    numero_fiscalia, provincia, recaptcha (por defecto 'verdad').
+    Opciones:
+      - detalle: True para traer informacion + incidencias.
+      - actuaciones: True para traer actuaciones (usa primer incidente).
+      - ingreso_directo: True para consultar existeIngresoDirecto (usa primer incidente).
+    """
+    try:
+        page = int(payload.get("page") or 1)
+        size = int(payload.get("size") or 10)
+    except Exception:
+        page, size = 1, 10
+
+    try:
+        res_busqueda = _buscar_causas_avanzado(payload, page, size)
+    except Exception as e:
+        return {"error": f"No se pudo buscar causas (avanzada): {e}"}
+
+    if not payload.get("detalle"):
+        return res_busqueda
+
+    id_juicio = payload.get("idJuicio") or payload.get("id_juicio") or payload.get("numero_causa")
+    if not id_juicio:
+        return {**res_busqueda, "warning": "Para detalle envíe idJuicio o numero_causa"}
+
+    detalle: Dict[str, Any] = {}
+    try:
+        detalle["informacion"] = _get_informacion_juicio(id_juicio)
+    except Exception as e:
+        detalle["informacion_error"] = str(e)
+    try:
+        incidencias = _get_incidente_judicatura(id_juicio)
+        detalle["incidencias"] = incidencias
+        if payload.get("actuaciones") and incidencias:
+            inc = incidencias[0]
+            act_payload = {
+                "aplicativo": "web",
+                "idIncidenteJudicatura": inc.get("idIncidenteJudicatura"),
+                "idJudicatura": inc.get("idJudicatura"),
+                "idJuicio": id_juicio,
+                "idMovimientoJuicioIncidente": inc.get("idMovimientoJuicioIncidente"),
+                "incidente": inc.get("incidente") or 1,
+                "nombreJudicatura": inc.get("nombreJudicatura"),
+            }
+            try:
+                detalle["actuaciones"] = _get_actuaciones(act_payload)
+            except Exception as e:
+                detalle["actuaciones_error"] = str(e)
+        if payload.get("ingreso_directo") and incidencias:
+            inc = incidencias[0]
+            try:
+                detalle["ingreso_directo"] = _existe_ingreso_directo(id_juicio, inc.get("idMovimientoJuicioIncidente"))
+            except Exception as e:
+                detalle["ingreso_directo_error"] = str(e)
+    except Exception as e:
+        detalle["incidencias_error"] = str(e)
+
+    return {**res_busqueda, "detalle": detalle}
+
+
+# ============================================================
+# Procesos resueltos por juez (API Manticore)
+# ============================================================
+def consultar_procesos_resueltos(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Consulta procesos resueltos por juez.
+    Campos:
+      - identificacion_juez (str) o nombre_juez (si el backend lo acepta, aquí usamos identificación)
+      - id_materia (int) o lista idMateria (por defecto [1])
+      - fechaInicio, fechaFin, idProvincia opcionales
+    """
+    headers = _headers_procesos_api()
+    cookie = os.getenv("PJ_COOKIE")
+    if cookie:
+        headers["Cookie"] = cookie
+
+    ident = payload.get("identificacion_juez") or payload.get("identificacionJuez") or ""
+    materia = payload.get("id_materia") or payload.get("idMateria") or [1]
+    if isinstance(materia, int):
+        materia = [materia]
+    body = {
+        "resultadoSearch": {
+            "idMateria": materia or [1],
+            "identificacionJuez": ident,
+            "fechaInicio": payload.get("fechaInicio") or "",
+            "fechaFin": payload.get("fechaFin") or "",
+            "idProvincia": payload.get("idProvincia") or "",
+        },
+        "idMateria": materia or [1],
+        "idProvincia": payload.get("idProvincia") or "",
+        "identificacionJuez": ident,
+    }
+    page = int(payload.get("page") or 1)
+    size = int(payload.get("size") or 10)
+    params = {"page": page, "size": size}
+
+    url = f"{URLS['procesos_resueltos_api']}/procesos-judiciales-resueltos"
+    try:
+        resp = requests.post(url, json=body, params=params, headers=headers, timeout=25)
+        resp.raise_for_status()
+        data = resp.json() or {}
+        items = data.get("resultadoProcesosResueltos") or []
+        mapped = []
+        for it in items:
+            mapped.append(
+                {
+                    "idJuicio": it.get("idJuicio"),
+                    "fecha_ingreso": it.get("fechaIngreso"),
+                    "delito": it.get("nombreDelito"),
+                    "estado": it.get("estadoActual"),
+                }
+            )
+        return {"total": data.get("totalRegistros"), "resultado": mapped}
+    except Exception as e:
+        return {"error": f"No se pudo consultar procesos resueltos: {e}"}
+
+
+def consultar_incidente_judicatura(id_incidente: str) -> Dict[str, Any]:
+    """
+    Consulta detalle de incidentes/litigantes para un incidente dado (endpoint getIncidenteJudicatura/{id})
+    """
+    headers = _headers_procesos_api()
+    cookie = os.getenv("PJ_COOKIE")
+    if cookie:
+        headers["Cookie"] = cookie
+    url = f"{URLS['procesos_api_clex']}/informacion/getIncidenteJudicatura/{id_incidente}"
+    try:
+        resp = requests.get(url, headers=headers, timeout=25)
+        resp.raise_for_status()
+        return resp.json() or {}
+    except Exception as e:
+        return {"error": f"No se pudo obtener incidenteJudicatura {id_incidente}: {e}"}
