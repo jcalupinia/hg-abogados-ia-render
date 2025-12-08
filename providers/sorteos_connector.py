@@ -2,8 +2,7 @@ import os
 import json
 import base64
 import requests
-from typing import Any, Dict, Optional, List
-
+from typing import Any, Dict, List
 
 BASE_URL = os.getenv("SORTEOS_BASE_URL", "https://esacc.corteconstitucional.gob.ec").rstrip("/")
 DETALLE_BASE_URL = os.getenv("SORTEOS_DETALLE_BASE_URL", "https://buscador.corteconstitucional.gob.ec").rstrip("/")
@@ -13,7 +12,7 @@ def _b64_payload(data: Dict[str, Any]) -> str:
     return base64.b64encode(json.dumps(data).encode("utf-8")).decode("utf-8")
 
 
-def _session(base: str) -> requests.Session:
+def _session(base: str, referer_suffix: str = "/buscadorsorteos/buscador") -> requests.Session:
     s = requests.Session()
     s.headers.update(
         {
@@ -21,7 +20,7 @@ def _session(base: str) -> requests.Session:
             "Accept": "application/json, text/plain, */*",
             "Content-Type": "application/json; charset=UTF-8",
             "Origin": base,
-            "Referer": f"{base}/buscadorsorteos/buscador",
+            "Referer": f"{base}{referer_suffix}",
         }
     )
     return s
@@ -90,10 +89,6 @@ def _map_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Requiere causa_id (id num�rico del resultado) y opcional numero_causa.
-    Devuelve la ficha de la causa y, si se solicita, los documentos/anexos.
-    """
     causa_id = payload.get("causa_id") or payload.get("id") or payload.get("causaId")
     numero_causa = payload.get("numero_causa") or payload.get("numeroCausa") or ""
     incluir_docs = payload.get("documentos") or payload.get("anexos") or payload.get("incluir_documentos")
@@ -108,7 +103,9 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
         "contexto": "CAUSA",
     }
 
-    sess = _session(DETALLE_BASE_URL)
+    referer = f"/buscador-externo/causa/ficha?contexto=CAUSA&uuid=&numero={numero_causa}" if numero_causa else "/buscador-externo/causa/ficha?contexto=CAUSA"
+    sess = _session(DETALLE_BASE_URL, referer_suffix=referer)
+
     try:
         ficha_resp = sess.post(
             f"{DETALLE_BASE_URL}/buscador-causa-juridico/rest/api/causa/obtenerFicha",
@@ -122,7 +119,6 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
             "ficha": ficha_data.get("dato"),
         }
 
-        # Si el cliente solicita documentos, intentar obtenerlos.
         if incluir_docs:
             try:
                 doc_resp = sess.post(
@@ -142,7 +138,6 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
                 result["documentos"] = documentos
                 result["anexos"] = anexos
             except Exception:
-                # No fallar toda la llamada por documentos
                 result.setdefault("incidencias", []).append("No se pudieron obtener documentos")
 
         return result
@@ -151,10 +146,6 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def consultar_sorteos(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Si el payload incluye 'detalle' o 'causa_id', devuelve detalle de la causa.
-    De lo contrario, realiza la b�squeda principal.
-    """
     if payload.get("detalle") or payload.get("causa_id"):
         return detalle_expediente(payload)
     return buscar_sorteos(payload)
