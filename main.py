@@ -1,7 +1,7 @@
 # ======================================================
 # H&G ABOGADOS IA - ROBOT JURÃDICO AUTOMATIZADO
 # Compatible con Render.com + FastAPI + Playwright
-# VersiÃ³n estable 2025-11
+# Version estable 2025-11
 # ======================================================
 
 from fastapi import FastAPI, Request, HTTPException
@@ -14,7 +14,7 @@ import uvloop
 import nest_asyncio
 
 # ============================================
-# âš™ï¸ Compatibilidad con entorno Render (modo sandbox)
+# Compatibilidad con entorno Render (modo sandbox)
 # ============================================
 try:
     import nest_asyncio
@@ -34,30 +34,36 @@ try:
         consultar_jurisprudencia,
         consultar_corte_nacional,
         consultar_procesos_judiciales,
+        consultar_procesos_avanzada,
+        consultar_procesos_resueltos,
         consultar_juriscopio,
     )
     from providers.supercias_connectors import consultar_supercias_companias
     from providers.uafe_connector import consultar_uafe
+    from providers.sorteos_connector import consultar_sorteos
     print("Conectores cargados correctamente.")
 except ModuleNotFoundError as e:
     consultar_fielweb = None
     consultar_jurisprudencia = None
     consultar_corte_nacional = None
     consultar_procesos_judiciales = None
+    consultar_procesos_avanzada = None
+    consultar_procesos_resueltos = None
     consultar_juriscopio = None
     consultar_supercias_companias = None
     consultar_uafe = None
+    consultar_sorteos = None
     print(f"Error al importar conectores: {e}")
 
 # ============================================
-# ðŸš€ InicializaciÃ³n del servicio FastAPI
+# Inicializacion del servicio FastAPI
 # ============================================
 app = FastAPI(title="H&G Abogados IA - Robot JurÃ­dico Inteligente")
 API_KEY = os.getenv("X_API_KEY")
 API_KEY_DISABLED = os.getenv("DISABLE_API_KEY", "false").lower() == "true"
 
 # ============================================
-# ðŸ” Middleware de seguridad por API Key
+# Middleware de seguridad por API Key
 # ============================================
 @app.middleware("http")
 async def verify_api_key(request: Request, call_next):
@@ -80,7 +86,7 @@ async def verify_api_key(request: Request, call_next):
     return await call_next(request)
 
 # ============================================
-# âœ… Endpoints bÃ¡sicos
+# Endpoints basicos
 # ============================================
 @app.get("/")
 async def root():
@@ -91,7 +97,7 @@ async def health():
     return {"status": "ok", "service": "H&G Abogados IA"}
 
 # ============================================
-# âš–ï¸ Consultas FielWeb
+# Consultas FielWeb
 # ============================================
 @app.post("/consult_real_fielweb")
 async def consult_fielweb_endpoint(payload: dict):
@@ -104,7 +110,7 @@ async def consult_fielweb_endpoint(payload: dict):
         raise HTTPException(status_code=500, detail=f"Error FielWeb: {str(e)}")
 
 # ============================================
-# âš–ï¸ Consultas Jurisprudenciales
+# Consultas Jurisprudenciales
 # ============================================
 @app.post("/consult_real_jurisprudencia")
 async def consult_jurisprudencia_endpoint(payload: dict):
@@ -117,7 +123,7 @@ async def consult_jurisprudencia_endpoint(payload: dict):
         raise HTTPException(status_code=500, detail=f"Error Jurisprudencia: {str(e)}")
 
 # ============================================
-# ðŸ”Ž Consulta individual Corte Nacional (nuevo buscador)
+# Consulta individual Corte Nacional (nuevo buscador)
 # ============================================
 @app.post("/consult_corte_nacional")
 async def consult_corte_nacional_endpoint(payload: dict):
@@ -140,9 +146,36 @@ async def consult_procesos_judiciales_endpoint(payload: dict):
         return await run_in_threadpool(consultar_procesos_judiciales, payload)
     except Exception as e:
         traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error Procesos Judiciales: {str(e)}")
 
 # ============================================
-# Consulta Superintendencia de Compa??as (compa??as)
+# Consulta Procesos Judiciales - Búsqueda avanzada (API)
+# ============================================
+@app.post("/consult_procesos_avanzada")
+async def consult_procesos_avanzada_endpoint(payload: dict):
+    if not consultar_procesos_avanzada:
+        raise HTTPException(status_code=500, detail="Conector Procesos Judiciales (avanzada) no disponible.")
+    try:
+        return await run_in_threadpool(consultar_procesos_avanzada, payload)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error Procesos Judiciales (avanzada): {str(e)}")
+
+# ============================================
+# Consulta Procesos resueltos por juez
+# ============================================
+@app.post("/consult_procesos_resueltos")
+async def consult_procesos_resueltos_endpoint(payload: dict):
+    if not consultar_procesos_resueltos:
+        raise HTTPException(status_code=500, detail="Conector Procesos resueltos no disponible.")
+    try:
+        return await run_in_threadpool(consultar_procesos_resueltos, payload)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error Procesos resueltos: {str(e)}")
+
+# ============================================
+# Consulta Superintendencia de Compañias (compañias)
 # ============================================
 @app.post("/consult_supercias_companias")
 async def consult_supercias_companias_endpoint(payload: dict):
@@ -168,7 +201,18 @@ async def consult_juriscopio_endpoint(payload: dict):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error Juriscopio: {str(e)}")
 
-# ðŸ”Ž Consulta UAFE (sujetos obligados)
+# Buscador de Sorteos (Corte Constitucional)
+@app.post("/consult_sorteos")
+async def consult_sorteos_endpoint(payload: dict):
+    if not consultar_sorteos:
+        raise HTTPException(status_code=500, detail="Conector Sorteos no disponible.")
+    try:
+        return await run_in_threadpool(consultar_sorteos, payload)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error Sorteos: {str(e)}")
+
+# Consulta UAFE (sujetos obligados)
 # ============================================
 @app.post("/consult_real_uafe")
 async def consult_uafe_endpoint(payload: dict):
@@ -187,7 +231,7 @@ async def consult_uafe_endpoint(payload: dict):
         )
 
 # ============================================
-# ðŸ¤– Flujo HÃ­brido (Normativa + Jurisprudencia)
+# Flujo Hibrido (Normativa + Jurisprudencia)
 # ============================================
 @app.post("/consult_hybrid")
 async def consult_hybrid(payload: dict):
@@ -220,7 +264,7 @@ async def consult_hybrid(payload: dict):
         raise HTTPException(status_code=500, detail=f"Error hÃ­brido: {str(e)}")
 
 # ============================================
-# ðŸ§  DiagnÃ³stico de entorno
+# Diagnostico de entorno
 # ============================================
 def _ping_url(url: str, label: str) -> dict:
     """Prueba de conectividad HTTP simple con User-Agent de navegador."""
@@ -329,7 +373,7 @@ async def check_corte_constitucional_status():
 
 @app.get("/check_uafe_status")
 async def check_uafe_status():
-    """DiagnÃ³stico rÃ¡pido de conectividad al portal de UAFE (resoluciones)."""
+    """Diagnostico rapido de conectividad al portal de UAFE (resoluciones)."""
     try:
         url = os.getenv("UAFE_URL", "https://www.uafe.gob.ec/resoluciones-sujetos-obligados/")
         detalle = [{"id": "uafe", **_ping_url(url, "UAFE")}]
@@ -351,7 +395,7 @@ async def check_uafe_status():
 @app.get("/check_fielweb_status")
 async def check_fielweb_status():
     """
-    ðŸ” Verifica la configuraciÃ³n completa del entorno FielWeb y Render.
+    Verifica la configuracion completa del entorno FielWeb y Render.
     Muestra estado de Playwright, variables de entorno, loop y autenticaciÃ³n.
     """
     import sys
@@ -380,24 +424,24 @@ async def check_fielweb_status():
     pwd = os.getenv("FIELWEB_PASSWORD")
     url = os.getenv("FIELWEB_LOGIN_URL")
     credenciales_ok = all([user, pwd, url])
-    credenciales_estado = "âœ… Configuradas" if credenciales_ok else "âš ï¸ Incompletas"
+    credenciales_estado = "Configuradas" if credenciales_ok else "Incompletas"
 
     # --- Test rÃ¡pido de acceso a la URL de FielWeb ---
     import requests
     try:
         resp = requests.get(url, timeout=8)
         if resp.status_code == 200:
-            conexion_estado = "âœ… Acceso correcto a FielWeb"
+            conexion_estado = "Acceso correcto a FielWeb"
         elif resp.status_code == 403:
-            conexion_estado = "âš ï¸ Bloqueo 403 (IP o sesiÃ³n restringida)"
+            conexion_estado = "Bloqueo 403 (IP o sesion restringida)"
         else:
-            conexion_estado = f"âš ï¸ Respuesta inesperada HTTP {resp.status_code}"
+            conexion_estado = f"Respuesta inesperada HTTP {resp.status_code}"
     except Exception as e:
-        conexion_estado = f"âŒ Error de conexiÃ³n: {str(e)}"
+        conexion_estado = f"Error de conexion: {str(e)}"
 
     # --- Resumen de entorno ---
     return {
-        "estado": "verificaciÃ³n completada",
+        "estado": "verificacion completada",
         "entorno": render_mode,
         "python_version": sys.version.split()[0],
         "so": platform.system(),
@@ -407,12 +451,12 @@ async def check_fielweb_status():
         "url_login": url,
         "conexion_fielweb": conexion_estado,
         "providers": provider_status,
-        "api_key_configurada": "âœ…" if os.getenv("X_API_KEY") else "âŒ No definida",
+        "api_key_configurada": "…" if os.getenv("X_API_KEY") else "No definida",
         "debug_mode": os.getenv("DEBUG", "false"),
     }
 
 # ============================================
-# ðŸ§© EjecuciÃ³n local o Render
+# Ejecucion local o Render
 # ============================================
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10000))
