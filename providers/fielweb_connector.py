@@ -61,6 +61,12 @@ def _login_and_token(sess: requests.Session) -> str:
     if not FIELWEB_USERNAME or not FIELWEB_PASSWORD:
         raise RuntimeError("Faltan credenciales FIELWEB_USERNAME/FIELWEB_PASSWORD.")
 
+    # GET inicial para iniciar sesion ASP.NET y obtener cookies como ASP.NET_SessionId
+    try:
+        sess.get(FIELWEB_LOGIN_URL, timeout=20)
+    except Exception:
+        pass
+
     signin_payload = {"u": FIELWEB_USERNAME, "c": FIELWEB_PASSWORD, "r": False, "aQS": False}
     data = _post_json(sess, "/Cuenta/login.aspx/signin", signin_payload)
     if not data.get("d", {}).get("Respuesta", True):
