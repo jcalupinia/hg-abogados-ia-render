@@ -99,11 +99,12 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not causa_id:
         return {"error": "Debe proporcionar causa_id"}
 
+    # El servicio usa claves 'nemeroCausa' y contexto 'CAUUA' (tal cual las env�a el front)
     ficha_body = {
-        "numeroCausa": numero_causa,
+        "nemeroCausa": numero_causa,
         "idCausa": causa_id,
         "uid": "",
-        "contexto": "CAUSA",
+        "contexto": "CAUUA",
     }
 
     referer = f"/buscador-externo/causa/ficha?contexto=CAUSA&uuid=&numero={numero_causa}" if numero_causa else "/buscador-externo/causa/ficha?contexto=CAUSA"
