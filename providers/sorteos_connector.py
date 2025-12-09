@@ -125,8 +125,9 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         if incluir_docs:
             try:
-                # El front vuelve a usar 100_EXPEDIENTE_DCMTO y, si no hay id, env�a solo numero
-                doc_payload = {"id": causa_id} if causa_id else {"numero": numero_causa}
+                # El front usa 100_EXPEDIENTE_DCMTO con dato base64 del tipo {"id": 230361}
+                doc_payload = {"id": causa_id} if causa_id else None
+                doc_payload = doc_payload or {"numero": numero_causa}
                 doc_resp = sess.post(
                     f"{DETALLE_BASE_URL}/buscador-causa-juridico/rest/api/expedienteDocumento/100_EXPEDIENTE_DCMTO",
                     json={"dato": _b64_payload(doc_payload)},
