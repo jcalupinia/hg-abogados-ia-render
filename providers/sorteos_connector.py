@@ -99,7 +99,7 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not causa_id and not numero_causa:
         return {"error": "Debe proporcionar causa_id o numero_causa"}
 
-    # El backend acepta varias formas; probamos primero con el payload m�nimo que usa el front cuando solo hay n�mero.
+    # Payloads tal cual los usa el front
     ficha_body = {"numero": numero_causa} if numero_causa and not causa_id else {
         "nemeroCausa": numero_causa,
         "idCausa": causa_id,
@@ -125,9 +125,11 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         if incluir_docs:
             try:
+                # El front vuelve a usar 100_EXPEDIENTE_DCMTO y, si no hay id, env�a solo numero
+                doc_payload = {"id": causa_id} if causa_id else {"numero": numero_causa}
                 doc_resp = sess.post(
                     f"{DETALLE_BASE_URL}/buscador-causa-juridico/rest/api/expedienteDocumento/100_EXPEDIENTE_DCMTO",
-                    json={"dato": _b64_payload({"id": causa_id}) if causa_id else {"dato": _b64_payload({"numero": numero_causa})}},
+                    json={"dato": _b64_payload(doc_payload)},
                     timeout=30,
                 )
                 doc_resp.raise_for_status()
