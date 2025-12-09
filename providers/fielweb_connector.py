@@ -290,6 +290,8 @@ def _buscar(
         "ld": [],
         "lr": [],
         "ls": [],
+        "pk": None,
+        "k": "",
     }
     data = _post_json(sess, "/app/tpl/buscador/busquedas.aspx/buscar", payload)
     resultado = data.get("d", {}).get("Data") or []
