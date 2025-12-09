@@ -75,7 +75,7 @@ def _login_and_token(sess: requests.Session) -> str:
 
     _post_json(sess, "/Cuenta/login.aspx/aceptoTerminosCondiciones", {"u": FIELWEB_USERNAME})
 
-    usuario = _post_json(sess, "/Cuenta/login.aspx/traerUsuario", {})
+    usuario = _post_json(sess, "/app/main.aspx/traerUsuario", {})
     token = usuario.get("d", {}).get("Data", {}).get("token")
     if not token:
         raise RuntimeError("No se obtuvo token desde traerUsuario.")
