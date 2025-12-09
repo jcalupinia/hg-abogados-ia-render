@@ -121,6 +121,10 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
             "mensaje": ficha_data.get("mensaje"),
             "ficha": ficha_data.get("dato"),
         }
+        if not causa_id:
+            ficha = result.get("ficha") or {}
+            causa_dto = ficha.get("causaDTO") or ficha.get("causa") or {}
+            causa_id = causa_dto.get("id") or ficha.get("idCausa")
 
         if incluir_docs:
             try:
