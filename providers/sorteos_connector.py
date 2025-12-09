@@ -124,10 +124,11 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         if incluir_docs:
             try:
-                # El front usa 100_EXPEDIENTE_DCMTO con dato base64 del tipo {"id": <idCausa>}
+                # El front usa 100_EXPEDNTE_DCMTO (sin la "I") con dato base64 {"id": <idCausa>}
                 doc_payload = {"id": causa_id} if causa_id else {"numero": numero_causa}
+                doc_url = f"{DETALLE_BASE_URL}/buscador-externo/rest/api/expedienteDocumento/100_EXPEDNTE_DCMTO"
                 doc_resp = sess.post(
-                    f"{DETALLE_BASE_URL}/buscador-causa-juridico/rest/api/expedienteDocumento/100_EXPEDIENTE_DCMTO",
+                    doc_url,
                     json={"dato": _b64_payload(doc_payload)},
                     timeout=30,
                 )
