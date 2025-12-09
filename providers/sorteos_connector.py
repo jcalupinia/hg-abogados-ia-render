@@ -99,7 +99,6 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not causa_id and not numero_causa:
         return {"error": "Debe proporcionar causa_id o numero_causa"}
 
-    # Payloads tal cual los usa el front
     ficha_body = {"numero": numero_causa} if numero_causa and not causa_id else {
         "nemeroCausa": numero_causa,
         "idCausa": causa_id,
@@ -125,9 +124,8 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         if incluir_docs:
             try:
-                # El front usa 100_EXPEDIENTE_DCMTO con dato base64 del tipo {"id": 230361}
-                doc_payload = {"id": causa_id} if causa_id else None
-                doc_payload = doc_payload or {"numero": numero_causa}
+                # El front usa 100_EXPEDIENTE_DCMTO con dato base64 del tipo {"id": <idCausa>}
+                doc_payload = {"id": causa_id} if causa_id else {"numero": numero_causa}
                 doc_resp = sess.post(
                     f"{DETALLE_BASE_URL}/buscador-causa-juridico/rest/api/expedienteDocumento/100_EXPEDIENTE_DCMTO",
                     json={"dato": _b64_payload(doc_payload)},
@@ -144,6 +142,9 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
                         anexos.append(_map_doc(an))
                 result["documentos"] = documentos
                 result["anexos"] = anexos
+            except requests.RequestException as dre:
+                msg = f"{getattr(dre.response, 'status_code', '')} {getattr(dre.response, 'text', '')}"
+                result.setdefault("incidencias", []).append(f"Documentos no disponibles: {msg}")
             except Exception as doc_e:
                 result.setdefault("incidencias", []).append(f"Documentos no disponibles: {doc_e}")
 
