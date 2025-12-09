@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 
 BASE_URL = os.getenv("SORTEOS_BASE_URL", "https://esacc.corteconstitucional.gob.ec").rstrip("/")
 DETALLE_BASE_URL = os.getenv("SORTEOS_DETALLE_BASE_URL", "https://buscador.corteconstitucional.gob.ec").rstrip("/")
+SORTEOS_COOKIE = os.getenv("SORTEOS_COOKIE", "")
 
 
 def _b64_payload(data: Dict[str, Any]) -> str:
@@ -23,6 +24,8 @@ def _session(base: str, referer_suffix: str = "/buscadorsorteos/buscador") -> re
             "Referer": f"{base}{referer_suffix}",
         }
     )
+    if SORTEOS_COOKIE:
+        s.headers["Cookie"] = SORTEOS_COOKIE
     return s
 
 
@@ -137,10 +140,13 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
                         anexos.append(_map_doc(an))
                 result["documentos"] = documentos
                 result["anexos"] = anexos
-            except Exception:
-                result.setdefault("incidencias", []).append("No se pudieron obtener documentos")
+            except Exception as doc_e:
+                result.setdefault("incidencias", []).append(f"Documentos no disponibles: {doc_e}")
 
         return result
+    except requests.RequestException as re:
+        msg = re.response.text if re.response is not None else str(re)
+        return {"error": f"Error al obtener detalle de expediente: {msg}"}
     except Exception as e:
         return {"error": f"Error al obtener detalle de expediente: {e}"}
 
