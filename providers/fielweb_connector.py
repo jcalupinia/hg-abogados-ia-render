@@ -39,6 +39,7 @@ def _session() -> requests.Session:
             "Content-Type": "application/json; charset=UTF-8",
             "Origin": FIELWEB_BASE,
             "Referer": FIELWEB_LOGIN_URL,
+            "X-Requested-With": "XMLHttpRequest",
         }
     )
     return s
