@@ -154,6 +154,7 @@ def _generar_doc(
     titulo: str,
     concordancias: bool,
     formato: str,
+    include_content: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """
     Genera ruta de descarga para PDF/Word/HTML usando los endpoints generarPDF/generarDOC/generarHTML.
@@ -184,13 +185,22 @@ def _generar_doc(
         ruta = resp.get("d", {}).get("Data")
         if not ruta:
             return None
-        # iframe de descarga directa
         ruta_enc = ruta.replace("\\", "\\\\")
         download_url = (
             f"{FIELWEB_BASE}/Clases/iFrameDescarga.aspx?"
             f"ArchivoDescarga={ruta}&TipoArchivo={tipo_archivo_map[formato.lower()]}"
         )
-        return {"ruta": ruta_enc, "download_url": download_url}
+        resultado: Dict[str, Any] = {"ruta": ruta_enc, "download_url": download_url}
+        if include_content:
+            try:
+                headers = {"Referer": f"{FIELWEB_BASE}/Index.aspx?nid={norma_id}#norma/{norma_id}"}
+                archivo_resp = sess.get(download_url, headers=headers, timeout=60)
+                archivo_resp.raise_for_status()
+                resultado["archivo_base64"] = base64.b64encode(archivo_resp.content).decode("ascii")
+                resultado["content_type"] = archivo_resp.headers.get("Content-Type")
+            except Exception as file_exc:
+                resultado["archivo_error"] = str(file_exc)
+        return resultado
     except Exception:
         return None
 
@@ -308,8 +318,8 @@ def _buscar(
                 continue
             # Construir descargas para pdf/word/html con y sin concordancias
             for fmt in ("pdf", "word", "html"):
-                sin = _generar_doc(sess, nid, titulo, False, fmt)
-                con = _generar_doc(sess, nid, titulo, True, fmt)
+                sin = _generar_doc(sess, nid, titulo, False, fmt, include_content=incluir_descargas)
+                con = _generar_doc(sess, nid, titulo, True, fmt, include_content=incluir_descargas)
                 key_sin = f"{fmt}_sin"
                 key_con = f"{fmt}_con"
                 mapped[idx].setdefault("descargas", {})[key_sin] = sin
