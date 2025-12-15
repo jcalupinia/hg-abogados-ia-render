@@ -1,12 +1,38 @@
 import os
 import json
 import base64
+import unicodedata
 import requests
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 BASE_URL = os.getenv("SORTEOS_BASE_URL", "https://esacc.corteconstitucional.gob.ec").rstrip("/")
 DETALLE_BASE_URL = os.getenv("SORTEOS_DETALLE_BASE_URL", "https://buscador.corteconstitucional.gob.ec").rstrip("/")
 SORTEOS_COOKIE = os.getenv("SORTEOS_COOKIE", "")
+
+
+def _normalize_nombre(value: str) -> str:
+    return unicodedata.normalize("NFD", value or "").encode("ascii", "ignore").decode("ascii").lower().strip()
+
+
+def _load_jueces_map() -> Dict[str, str]:
+    """
+    Permite definir via env SORTEOS_JUECES_MAP un JSON del tipo {"Jhoel Marlin Escudero Soliz": "jhoel.escudero"}
+    """
+    raw = os.getenv("SORTEOS_JUECES_MAP")
+    mapping: Dict[str, str] = {}
+    if not raw:
+        return mapping
+    try:
+        data = json.loads(raw)
+        for nombre, usuario in (data or {}).items():
+            if nombre and usuario:
+                mapping[_normalize_nombre(nombre)] = usuario
+    except Exception:
+        pass
+    return mapping
+
+
+JUECES_USUARIOS = _load_jueces_map()
 
 
 def _b64_payload(data: Dict[str, Any]) -> str:
@@ -35,18 +61,28 @@ def buscar_sorteos(payload: Dict[str, Any]) -> Dict[str, Any]:
     numero_causa = payload.get("numero_causa") or payload.get("numeroCausa") or ""
     despacho_id = payload.get("despacho_id") or payload.get("id") or None
     resorteado = payload.get("resorteado") if "resorteado" in payload else None
+    usuario_sorteado = payload.get("usuario_sorteado") or payload.get("usuarioSorteado")
+    nombre_juez = payload.get("nombre_juez") or payload.get("juez") or payload.get("nombreJuez")
 
     if not fecha_desde or not fecha_hasta:
         return {"error": "Debe enviar fecha_desde y fecha_hasta"}
 
-    body = {
-        "id": despacho_id,
-        "fechaDesde": fecha_desde,
-        "fechaHasta": fecha_hasta,
-        "numeroCausa": numero_causa,
-        "contexto": "CAUSA",
-        "resorteado": resorteado,
-    }
+    resolved_usuario = _resolve_usuario_sorteado(usuario_sorteado, nombre_juez)
+    if resolved_usuario:
+        body = {
+            "usuarioSorteado": resolved_usuario,
+            "fechaInicio": _to_iso(fecha_desde),
+            "fechaFin": _to_iso(fecha_hasta),
+        }
+    else:
+        body = {
+            "id": despacho_id,
+            "fechaDesde": fecha_desde,
+            "fechaHasta": fecha_hasta,
+            "numeroCausa": numero_causa,
+            "contexto": "CAUSA",
+            "resorteado": resorteado,
+        }
 
     sess = _session(BASE_URL)
     try:
@@ -165,3 +201,25 @@ def consultar_sorteos(payload: Dict[str, Any]) -> Dict[str, Any]:
     if payload.get("detalle") or payload.get("causa_id") or payload.get("numero_causa"):
         return detalle_expediente(payload)
     return buscar_sorteos(payload)
+
+
+def _resolve_usuario_sorteado(usuario: Optional[str], nombre_juez: Optional[str]) -> Optional[str]:
+    if usuario:
+        return usuario.strip()
+    if not nombre_juez:
+        return None
+    nombre_norm = _normalize_nombre(nombre_juez)
+    if nombre_norm in JUECES_USUARIOS:
+        return JUECES_USUARIOS[nombre_norm]
+    parts = [p for p in nombre_norm.split() if p]
+    if len(parts) >= 2:
+        return f"{parts[0]}.{parts[-1]}"
+    return None
+
+
+def _to_iso(fecha: str) -> str:
+    if not fecha:
+        return ""
+    if "T" in fecha:
+        return fecha
+    return f"{fecha}T00:00:00.000Z"
