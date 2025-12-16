@@ -132,14 +132,14 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not causa_id and not numero_causa:
         return {"error": "Debe proporcionar causa_id o numero_causa"}
 
-    ficha_body = {"numero": numero_causa} if numero_causa and not causa_id else {
-        "nemeroCausa": numero_causa,
-        "idCausa": causa_id,
-        "uid": "",
-        "contexto": "CAUUA",
-    }
+    # La ficha externa funciona con el número de causa; si no lo tenemos, usamos idCausa.
+    if numero_causa:
+        ficha_body = {"numero": numero_causa}
+        referer = f"/buscador-externo/causa/ficha?contexto=CAUSA&uuid=&numero={numero_causa}"
+    else:
+        ficha_body = {"idCausa": causa_id}
+        referer = "/buscador-externo/causa/ficha?contexto=CAUSA"
 
-    referer = f"/buscador-externo/causa/ficha?contexto=CAUSA&uuid=&numero={numero_causa}" if numero_causa else "/buscador-externo/causa/ficha?contexto=CAUSA"
     sess = _session(DETALLE_BASE_URL, referer_suffix=referer)
 
     try:
@@ -154,9 +154,9 @@ def detalle_expediente(payload: Dict[str, Any]) -> Dict[str, Any]:
             "mensaje": ficha_data.get("mensaje"),
             "ficha": ficha_data.get("dato"),
         }
+        ficha = result.get("ficha") or {}
+        causa_dto = ficha.get("causaDTO") or ficha.get("causa") or {}
         if not causa_id:
-            ficha = result.get("ficha") or {}
-            causa_dto = ficha.get("causaDTO") or ficha.get("causa") or {}
             causa_id = causa_dto.get("id") or ficha.get("idCausa")
 
         if incluir_docs:
