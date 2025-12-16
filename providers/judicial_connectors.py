@@ -1081,6 +1081,8 @@ def _buscar_juriscopio_http_v2(payload: Dict[str, Any]) -> Dict[str, Any]:
     tipo_busqueda = (payload.get("tipo_busqueda") or payload.get("tipoBusqueda") or "").lower()
     texto = (payload.get("texto") or payload.get("query") or payload.get("texto_general") or "").strip()
     numero = (payload.get("numero") or payload.get("numero_caso") or payload.get("numSentencia") or "").strip()
+     if not numero and ("judicatura" in tipo_busqueda or modo == "judicatura"):
+        numero = texto
     size_req = payload.get("size")
 
     base_url = URLS["juriscopio_base"].rstrip("/")
