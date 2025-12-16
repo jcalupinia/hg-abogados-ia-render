@@ -58,39 +58,36 @@ def _session(base: str, referer_suffix: str = "/buscadorsorteos/buscador") -> re
 def buscar_sorteos(payload: Dict[str, Any]) -> Dict[str, Any]:
     fecha_desde = payload.get("fecha_desde") or payload.get("fechaDesde")
     fecha_hasta = payload.get("fecha_hasta") or payload.get("fechaHasta")
-    numero_causa = payload.get("numero_causa") or payload.get("numeroCausa") or ""
-    despacho_id = payload.get("despacho_id") or payload.get("id") or None
+    numero_causa = payload.get("numero_causa") or payload.get("numeroCausa")
     resorteado = payload.get("resorteado") if "resorteado" in payload else None
     usuario_sorteado = payload.get("usuario_sorteado") or payload.get("usuarioSorteado")
     nombre_juez = payload.get("nombre_juez") or payload.get("juez") or payload.get("nombreJuez")
 
-    if not fecha_desde or not fecha_hasta:
-        return {"error": "Debe enviar fecha_desde y fecha_hasta"}
-
-    resolved_usuario = _resolve_usuario_sorteado(usuario_sorteado, nombre_juez)
-    if resolved_usuario:
-        body = {
-            "usuarioSorteado": resolved_usuario,
-            "fechaInicio": _to_iso(fecha_desde),
-            "fechaFin": _to_iso(fecha_hasta),
-        }
+    if numero_causa:
+        body = {"numero": numero_causa}
+        endpoint = f"{BASE_URL}/esacc/rest/api/buscadorSorteo/obtenerPorNumeroCausa"
     else:
-        body = {
-            "id": despacho_id,
-            "fechaDesde": fecha_desde,
-            "fechaHasta": fecha_hasta,
-            "numeroCausa": numero_causa,
-            "contexto": "CAUSA",
-            "resorteado": resorteado,
-        }
+        if not fecha_desde or not fecha_hasta:
+            return {"error": "Debe enviar fecha_desde y fecha_hasta"}
+        resolved_usuario = _resolve_usuario_sorteado(usuario_sorteado, nombre_juez)
+        if resolved_usuario:
+            body = {
+                "usuarioSorteado": resolved_usuario,
+                "fechaInicio": _to_iso(fecha_desde),
+                "fechaFin": _to_iso(fecha_hasta),
+            }
+        else:
+            body = {
+                "fechaInicio": _to_iso(fecha_desde),
+                "fechaFin": _to_iso(fecha_hasta),
+            }
+            if resorteado is not None:
+                body["resorteado"] = resorteado
+        endpoint = f"{BASE_URL}/esacc/rest/api/buscadorSorteo/obtenerPorJuezFecha"
 
     sess = _session(BASE_URL)
     try:
-        resp = sess.post(
-            f"{BASE_URL}/esacc/rest/api/buscadorSorteo/obtenerPorJuezFecha",
-            json={"dato": _b64_payload(body)},
-            timeout=30,
-        )
+        resp = sess.post(endpoint, json={"dato": _b64_payload(body)}, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         resultados = data.get("dato") or []
