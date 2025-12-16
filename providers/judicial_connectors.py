@@ -1070,6 +1070,12 @@ def _buscar_juriscopio_http(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def _buscar_juriscopio_http_v2(payload: Dict[str, Any]) -> Dict[str, Any]:
     seccion = (payload.get("seccion") or payload.get("tab") or "causas").lower()
+    if seccion in ("sentencias_causas", "sentencias-causas"):
+        seccion = "causas"
+    if seccion in ("seleccion_autos", "autos_seleccion"):
+        seccion = "autos"
+    if seccion in ("seleccion_casos", "casos_ingresados"):
+        seccion = "seleccion"
     ambito = (payload.get("ambito") or payload.get("scope") or "").lower()
     modo = (payload.get("modo") or payload.get("tipo") or "texto").lower()
     tipo_busqueda = (payload.get("tipo_busqueda") or payload.get("tipoBusqueda") or "").lower()
