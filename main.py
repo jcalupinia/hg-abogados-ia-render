@@ -1,5 +1,5 @@
 # ======================================================
-# H&G ABOGADOS IA - ROBOT JURÃDICO AUTOMATIZADO
+# H&G ABOGADOS IA - ROBOT JURÍDICO AUTOMATIZADO
 # Compatible con Render.com + FastAPI + Playwright
 # Version estable 2025-11
 # ======================================================
@@ -9,7 +9,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 import os, traceback, asyncio
 import requests
-from typing import Optional
+from typing import Optional, Dict, Any, List
 import uvloop
 import nest_asyncio
 
@@ -58,7 +58,7 @@ except ModuleNotFoundError as e:
 # ============================================
 # Inicializacion del servicio FastAPI
 # ============================================
-app = FastAPI(title="H&G Abogados IA - Robot JurÃ­dico Inteligente")
+app = FastAPI(title="H&G Abogados IA - Robot Juri­dico Inteligente")
 API_KEY = os.getenv("X_API_KEY")
 API_KEY_DISABLED = os.getenv("DISABLE_API_KEY", "false").lower() == "true"
 
@@ -262,6 +262,130 @@ async def consult_hybrid(payload: dict):
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error hÃ­brido: {str(e)}")
+
+# ============================================
+# Pre-busqueda global (resumen por fuente)
+# ============================================
+def _min_fielweb_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "titulo": item.get("titulo"),
+        "numero": item.get("numero"),
+        "fecha_publicacion": item.get("fecha_publicacion"),
+        "fuente": "FielWeb",
+        "norma_id": item.get("norma_id"),
+        "seccion": item.get("seccion"),
+    }
+
+
+def _min_generic_item(item: Dict[str, Any], fuente: str) -> Dict[str, Any]:
+    return {
+        "titulo": item.get("titulo") or item.get("numero_sentencia") or item.get("numero_caso") or item.get("numero_proceso"),
+        "numero": item.get("numero_sentencia") or item.get("numero_caso") or item.get("numero_proceso"),
+        "fecha": item.get("fecha"),
+        "fuente": fuente,
+        "id": item.get("id") or item.get("id_causa"),
+    }
+
+
+@app.post("/consult_global")
+async def consult_global(payload: dict):
+    texto = (payload.get("texto") or payload.get("consulta") or payload.get("query") or "").strip()
+    if not texto:
+        raise HTTPException(status_code=400, detail="Debe proporcionar 'texto' para la pre-busqueda global.")
+
+    limit = int(payload.get("limit_por_fuente") or 3)
+    secciones_fielweb = payload.get("secciones_fielweb") or [1, 4]
+    fuentes = payload.get("usar_fuentes") or [
+        "fielweb",
+        "juriscopio",
+        "corte_nacional",
+        "jurisprudencia",
+        "uafe",
+    ]
+    fuentes = [f.lower() for f in fuentes]
+
+    resultado: Dict[str, Any] = {"texto": texto, "fuentes": {}}
+
+    # FielWeb (secciones 1 y 4 por defecto)
+    if "fielweb" in fuentes and consultar_fielweb:
+        fw_items: List[Dict[str, Any]] = []
+        for sec in secciones_fielweb:
+            try:
+                fw_payload = {
+                    "texto": texto,
+                    "seccion": sec,
+                    "reformas": "2",
+                    "page": 1,
+                    "descargar_pdf": False,
+                    "descargas": False,
+                }
+                resp = await run_in_threadpool(consultar_fielweb, fw_payload)
+                items = resp.get("resultado") or []
+                for it in items[:limit]:
+                    it["seccion"] = sec
+                    fw_items.append(_min_fielweb_item(it))
+            except Exception as e:
+                fw_items.append({"error": str(e), "seccion": sec})
+        resultado["fuentes"]["fielweb"] = fw_items[: max(1, limit * len(secciones_fielweb))]
+
+    # Juriscopio (casos + sentencias por texto)
+    if "juriscopio" in fuentes and consultar_juriscopio:
+        try:
+            casos_payload = {
+                "seccion": "sentencias_causas",
+                "ambito": "caso",
+                "tipo_busqueda": "texto_caso",
+                "texto": texto,
+                "page": 1,
+                "size": limit,
+            }
+            sent_payload = {
+                "seccion": "sentencias_causas",
+                "ambito": "sentencia",
+                "tipo_busqueda": "texto_sentencia",
+                "texto": texto,
+                "page": 1,
+                "size": limit,
+            }
+            casos = await run_in_threadpool(consultar_juriscopio, casos_payload)
+            sent = await run_in_threadpool(consultar_juriscopio, sent_payload)
+            resultado["fuentes"]["juriscopio_casos"] = [_min_generic_item(i, "Juriscopio - Casos") for i in (casos.get("resultado") or [])[:limit]]
+            resultado["fuentes"]["juriscopio_sentencias"] = [_min_generic_item(i, "Juriscopio - Sentencias") for i in (sent.get("resultado") or [])[:limit]]
+        except Exception as e:
+            resultado["fuentes"]["juriscopio"] = [{"error": str(e)}]
+
+    # Corte Nacional
+    if "corte_nacional" in fuentes and consultar_corte_nacional:
+        try:
+            cn_payload = {"texto": texto, "tipo_busqueda": "aproximada"}
+            cn = await run_in_threadpool(consultar_corte_nacional, cn_payload)
+            resultado["fuentes"]["corte_nacional"] = [_min_generic_item(i, "Corte Nacional") for i in (cn.get("resultado") or [])[:limit]]
+        except Exception as e:
+            resultado["fuentes"]["corte_nacional"] = [{"error": str(e)}]
+
+    # Jurisprudencia general
+    if "jurisprudencia" in fuentes and consultar_jurisprudencia:
+        try:
+            j_payload = {"texto": texto}
+            jr = await run_in_threadpool(consultar_jurisprudencia, j_payload)
+            resultado["fuentes"]["jurisprudencia"] = [_min_generic_item(i, "Jurisprudencia") for i in (jr.get("resultado") or [])[:limit]]
+        except Exception as e:
+            resultado["fuentes"]["jurisprudencia"] = [{"error": str(e)}]
+
+    # UAFE
+    if "uafe" in fuentes and consultar_uafe:
+        try:
+            uafe_payload = {"texto": texto}
+            uf = consultar_uafe(uafe_payload)
+            resultado["fuentes"]["uafe"] = (uf.get("resultado") or [])[:limit]
+        except Exception as e:
+            resultado["fuentes"]["uafe"] = [{"error": str(e)}]
+
+    return {
+        "mensaje": "Pre-busqueda global completada",
+        "texto": texto,
+        "fuentes": resultado["fuentes"],
+    }
 
 # ============================================
 # Diagnostico de entorno
