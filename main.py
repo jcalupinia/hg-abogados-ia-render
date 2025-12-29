@@ -6,10 +6,15 @@
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 import os, traceback, asyncio
 import requests
 from typing import Optional, Dict, Any, List
+import base64
+import json
+import hmac
+import hashlib
+import time
 import uvloop
 import nest_asyncio
 
@@ -29,7 +34,7 @@ except Exception as e:
 # Importacion de conectores
 # ============================================
 try:
-    from providers.fielweb_connector import consultar_fielweb
+    from providers.fielweb_connector import consultar_fielweb, descargar_norma_archivo
     from providers.judicial_connectors import (
         consultar_jurisprudencia,
         consultar_corte_nacional,
@@ -44,6 +49,7 @@ try:
     print("Conectores cargados correctamente.")
 except ModuleNotFoundError as e:
     consultar_fielweb = None
+    descargar_norma_archivo = None
     consultar_jurisprudencia = None
     consultar_corte_nacional = None
     consultar_procesos_judiciales = None
@@ -61,6 +67,40 @@ except ModuleNotFoundError as e:
 app = FastAPI(title="H&G Abogados IA - Robot Juri­dico Inteligente")
 API_KEY = os.getenv("X_API_KEY")
 API_KEY_DISABLED = os.getenv("DISABLE_API_KEY", "false").lower() == "true"
+DOWNLOAD_TOKEN_SECRET = os.getenv("DOWNLOAD_TOKEN_SECRET", "").strip()
+
+# ============================================
+# Helpers para enlaces de descarga firmados (FielWeb)
+# ============================================
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(data: str) -> bytes:
+    padding = "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode(data + padding)
+
+
+def _sign_download_payload(payload: Dict[str, Any], secret: str) -> str:
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    sig = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return f"{_b64url_encode(body)}.{sig}"
+
+
+def _verify_download_token(token: str, secret: str) -> Dict[str, Any]:
+    try:
+        body_b64, sig = token.rsplit(".", 1)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Token de descarga invalido.") from exc
+    body = _b64url_decode(body_b64)
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        raise HTTPException(status_code=401, detail="Token de descarga invalido.")
+    payload = json.loads(body.decode("utf-8"))
+    exp = payload.get("exp")
+    if exp and time.time() > float(exp):
+        raise HTTPException(status_code=401, detail="Token de descarga expirado.")
+    return payload
 
 # ============================================
 # Middleware de seguridad por API Key
@@ -76,6 +116,7 @@ async def verify_api_key(request: Request, call_next):
         "/check_corte_nacional_status",
         "/check_corte_constitucional_status",
         "/check_uafe_status",
+        "/fielweb/download",
     ]
     if request.url.path in allowed_routes or API_KEY_DISABLED or not API_KEY:
         return await call_next(request)
@@ -108,6 +149,84 @@ async def consult_fielweb_endpoint(payload: dict):
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error FielWeb: {str(e)}")
+
+
+@app.post("/fielweb/download_link")
+async def fielweb_download_link(payload: dict, request: Request):
+    norma_id = payload.get("norma_id")
+    if norma_id is None:
+        raise HTTPException(status_code=400, detail="Debe proporcionar 'norma_id'.")
+    try:
+        norma_id_int = int(norma_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="norma_id invalido.") from exc
+
+    formato = (payload.get("formato") or "pdf").lower()
+    if formato not in ("pdf", "word", "html"):
+        raise HTTPException(status_code=400, detail="formato debe ser pdf, word o html.")
+
+    concordancias = bool(payload.get("concordancias") or False)
+    ttl_seconds = int(payload.get("ttl_seconds") or 600)
+    secret = DOWNLOAD_TOKEN_SECRET or API_KEY
+    if not secret:
+        raise HTTPException(status_code=500, detail="DOWNLOAD_TOKEN_SECRET no configurado.")
+
+    exp = int(time.time()) + ttl_seconds
+    token_payload = {
+        "norma_id": norma_id_int,
+        "formato": formato,
+        "concordancias": concordancias,
+        "exp": exp,
+    }
+    token = _sign_download_payload(token_payload, secret)
+    base_url = str(request.base_url).rstrip("/")
+    return {
+        "download_url": f"{base_url}/fielweb/download?token={token}",
+        "exp": exp,
+    }
+
+
+@app.get("/fielweb/download")
+async def fielweb_download(token: str):
+    if not descargar_norma_archivo:
+        raise HTTPException(status_code=500, detail="Conector FielWeb no disponible.")
+    secret = DOWNLOAD_TOKEN_SECRET or API_KEY
+    if not secret:
+        raise HTTPException(status_code=500, detail="DOWNLOAD_TOKEN_SECRET no configurado.")
+    payload = _verify_download_token(token, secret)
+
+    norma_id = payload.get("norma_id")
+    formato = payload.get("formato") or "pdf"
+    concordancias = bool(payload.get("concordancias") or False)
+
+    try:
+        result = await run_in_threadpool(
+            descargar_norma_archivo,
+            int(norma_id),
+            formato,
+            concordancias,
+            None,
+        )
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error FielWeb descarga: {exc}") from exc
+    if not result:
+        raise HTTPException(status_code=502, detail="No se pudo descargar el archivo.")
+    if result.get("error"):
+        raise HTTPException(status_code=502, detail=result["error"])
+
+    content_type = result.get("content_type")
+    if not content_type:
+        if formato == "pdf":
+            content_type = "application/pdf"
+        elif formato == "word":
+            content_type = "application/msword"
+        else:
+            content_type = "text/html; charset=utf-8"
+
+    filename = result.get("filename") or f"norma_{norma_id}.{formato}"
+    headers = {"Content-Disposition": f'inline; filename="{filename}"'}
+    return Response(content=result["content_bytes"], media_type=content_type, headers=headers)
 
 # ============================================
 # Consultas Jurisprudenciales
