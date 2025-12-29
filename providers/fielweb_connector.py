@@ -205,6 +205,53 @@ def _generar_doc(
         return None
 
 
+def _filename_from_ruta(ruta: Optional[str], norma_id: int, formato: str) -> str:
+    ext_map = {"pdf": "pdf", "word": "doc", "html": "html"}
+    if ruta:
+        raw = ruta.replace("\\\\", "\\")
+        base = os.path.basename(raw)
+        if base:
+            return base
+    return f"norma_{norma_id}.{ext_map.get(formato.lower(), 'bin')}"
+
+
+def descargar_norma_archivo(
+    norma_id: int,
+    formato: str = "pdf",
+    concordancias: bool = False,
+    titulo: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Descarga un archivo (PDF/Word/HTML) de una norma por norma_id.
+    Retorna bytes, content_type y filename para servirlo desde el backend.
+    """
+    fmt = (formato or "pdf").lower()
+    sess = _session()
+    _login_and_token(sess)
+    info = _generar_doc(
+        sess,
+        norma_id,
+        titulo or f"Norma {norma_id}",
+        bool(concordancias),
+        fmt,
+        include_content=True,
+    )
+    if not info:
+        return None
+    archivo_base64 = info.get("archivo_base64")
+    if not archivo_base64:
+        return {"error": info.get("archivo_error") or "No se pudo descargar el archivo."}
+    try:
+        content_bytes = base64.b64decode(archivo_base64)
+    except Exception:
+        return {"error": "No se pudo decodificar el archivo."}
+    return {
+        "content_bytes": content_bytes,
+        "content_type": info.get("content_type"),
+        "filename": _filename_from_ruta(info.get("ruta"), norma_id, fmt),
+    }
+
+
 def _map_result(item: Dict[str, Any], descargar_pdf: bool, sess: requests.Session) -> Dict[str, Any]:
     ro_info = _build_ro_links(item.get("registroOficialImagen") or {})
     pdf_info = None
