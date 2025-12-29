@@ -329,6 +329,7 @@ def _buscar(
     page: int,
     descargar_pdf: bool,
     incluir_descargas: bool,
+    limite_resultados: Optional[int],
 ) -> Dict[str, Any]:
     payload = {
         "tk": token,
@@ -351,6 +352,8 @@ def _buscar(
     }
     data = _post_json(sess, "/app/tpl/buscador/busquedas.aspx/buscar", payload)
     resultado = data.get("d", {}).get("Data") or []
+    if isinstance(limite_resultados, int) and limite_resultados > 0:
+        resultado = resultado[:limite_resultados]
     mapped = [_map_result(r, descargar_pdf, sess) for r in resultado]
 
     if incluir_descargas:
@@ -434,11 +437,31 @@ def consultar_fielweb(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     descargar_pdf = bool(payload.get("descargar_pdf") or False)
     incluir_descargas = bool(payload.get("descargas") or False)
+    limite_resultados = payload.get("limite_resultados")
+    if limite_resultados is None:
+        limite_resultados = payload.get("max_resultados")
+    if limite_resultados is None:
+        limite_resultados = payload.get("limit")
+    try:
+        if limite_resultados is not None:
+            limite_resultados = int(limite_resultados)
+    except Exception:
+        limite_resultados = None
 
     try:
         sess = _session()
         token = _login_and_token(sess)
-        base = _buscar(sess, token, texto, seccion, reformas, page, descargar_pdf, incluir_descargas)
+        base = _buscar(
+            sess,
+            token,
+            texto,
+            seccion,
+            reformas,
+            page,
+            descargar_pdf,
+            incluir_descargas,
+            limite_resultados,
+        )
 
         # Opcional: traer detalle y parte de norma si se solicita
         norma_id = payload.get("norma_id") or payload.get("id_norma")
