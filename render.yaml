@@ -32,5 +32,3 @@ services:
         value: consultor@hygabogados.ec
       - key: FIELWEB_LOGIN_URL
         value: https://www.fielweb.com/Cuenta/Login.aspx
-      - key: X_API_KEY
-        value: HYGABOGADOS-SECURE-2025
