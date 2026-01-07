@@ -2,10 +2,12 @@ import os
 import asyncio
 import base64
 import json
+import re
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin, quote
 import requests
+from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
 # ================================
@@ -48,6 +50,7 @@ URLS = {
     "procesos_api": "https://api.funcionjudicial.gob.ec/EXPEL-CONSULTA-CAUSAS-SERVICE/api/consulta-causas",
     "procesos_api_clex": "https://api.funcionjudicial.gob.ec/EXPEL-CONSULTA-CAUSAS-CLEX-SERVICE/api/consulta-causas-clex",
     "procesos_resueltos_api": "https://api.funcionjudicial.gob.ec/MANTICORE-SERVICE/api/manticore/consulta",
+    "spdp_base": os.getenv("SPDP_BASE_URL", "https://spdp.gob.ec").strip(),
 }
 
 PAGE_TIMEOUT_MS = 30_000
@@ -1580,3 +1583,253 @@ def consultar_juriscopio(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {**res, "detalle": detalle}
     except Exception as e:
         return {**res, "detalle_error": str(e)}
+
+
+# ================================
+# SPDP (Superintendencia de Proteccion de Datos Personales)
+# ================================
+_SPDP_STATIC = {
+    "guias": [
+        {
+            "fuente": "SPDP",
+            "categoria": "guias",
+            "tipo": "guia",
+            "anio": 2025,
+            "titulo": "GUIA DE GESTION DE RIESGOS Y EVALUACION DE IMPACTO DEL TRATAMIENTO DE DATOS PERSONALES",
+            "url": "https://spdp.gob.ec/wp-content/uploads/2025/05/GUIA-DE-GESTION-DE-RIESGOS-E-IMPACTO-VERSION-1.pdf",
+        },
+        {
+            "fuente": "SPDP",
+            "categoria": "guias",
+            "tipo": "guia",
+            "anio": 2025,
+            "titulo": "GUIA DE PROTECCION DE DATOS PERSONALES DESDE EL DISENO Y POR DEFECTO",
+            "url": "https://spdp.gob.ec/wp-content/uploads/2025/10/40.02-Guia-de-Proteccion-de-Datos-desde-el-Diseno-y-por-Defecto.pdf",
+        },
+    ],
+    "modelos": [
+        {
+            "fuente": "SPDP",
+            "categoria": "modelos",
+            "tipo": "modelo",
+            "anio": 2025,
+            "titulo": "MODELOS PARA CALCULAR EL MONTO DE LAS MULTAS ADMINISTRATIVAS: MPRIV-1 Y MPUB-1",
+            "url": "https://spdp.gob.ec/wp-content/uploads/2025/07/22.02-Modelo-calculo-sanciones-administrativas.pdf",
+        }
+    ],
+    "circulares": [
+        {
+            "fuente": "SPDP",
+            "categoria": "circulares",
+            "tipo": "circular",
+            "anio": 2025,
+            "titulo": "DISPOSICION DE INFORMACION SOBRE DELEGADOS DE PROTECCION DE DATOS PERSONALES A INSTITUCIONES DE DERECHO PUBLICO",
+            "url": "https://spdp.gob.ec/wp-content/uploads/2025/01/disposicionDPD.pdf",
+        }
+    ],
+}
+
+_SPDP_ALIASES = {
+    "guias": "guias",
+    "guia": "guias",
+    "modelos": "modelos",
+    "modelo": "modelos",
+    "circulares": "circulares",
+    "circular": "circulares",
+    "consultas": "consultas",
+    "consultas_absueltas": "consultas",
+    "consultas_atendidas": "consultas",
+    "consultasatendidas": "consultas",
+    "oficios": "consultas",
+}
+
+_SPDP_RESUMEN_MAX = 450
+
+
+def _spdp_headers() -> Dict[str, str]:
+    return {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (compatible; H&G Abogados IA)",
+    }
+
+
+def _spdp_norm_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip().lower())
+
+
+def _spdp_parse_categoria(raw: str) -> str:
+    raw_key = _spdp_norm_text(raw).replace(" ", "_")
+    if not raw_key:
+        return "consultas"
+    return _SPDP_ALIASES.get(raw_key, "consultas")
+
+
+def _fetch_spdp_html(url: str) -> str:
+    resp = requests.get(url, headers=_spdp_headers(), timeout=25)
+    resp.raise_for_status()
+    return resp.text
+
+
+def _spdp_extract_oficio(titulo: str) -> str:
+    match = re.search(r"oficio\s*n[°º]?\s*([A-Za-z0-9\\-]+)", titulo or "", flags=re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return (titulo or "").strip()
+
+
+def _spdp_extract_section_text(container, keyword: str) -> str:
+    for section in container.select(".section"):
+        header = section.find("h3")
+        header_txt = _spdp_norm_text(header.get_text(" ", strip=True) if header else "")
+        if keyword in header_txt:
+            parts = []
+            for p in section.find_all("p"):
+                txt = " ".join(p.stripped_strings)
+                if txt:
+                    parts.append(txt)
+            if parts:
+                return " ".join(parts).strip()
+            fallback = " ".join(section.stripped_strings)
+            if header:
+                fallback = fallback.replace(header.get_text(" ", strip=True), "", 1).strip()
+            return fallback
+    return ""
+
+
+def _parse_spdp_consultas(html: str) -> List[Dict[str, Any]]:
+    soup = BeautifulSoup(html, "lxml")
+    consultas = []
+    consultas_url = f"{URLS['spdp_base'].rstrip('/')}/consultasatendidas/"
+    for block in soup.select("div.consulta"):
+        h2 = block.find("h2")
+        titulo = h2.get_text(" ", strip=True) if h2 else ""
+        oficio = _spdp_extract_oficio(titulo)
+        detalle = block.select_one(".detalle") or block
+
+        preguntas = []
+        for p in detalle.select(".pregunta p"):
+            txt = " ".join(p.stripped_strings)
+            if txt:
+                preguntas.append(txt)
+
+        analisis = _spdp_extract_section_text(detalle, "anal")
+        pronunciamiento = _spdp_extract_section_text(detalle, "pronuncia")
+
+        resumen = (pronunciamiento or analisis or "")
+        if not resumen and preguntas:
+            resumen = preguntas[0]
+        if resumen and len(resumen) > _SPDP_RESUMEN_MAX:
+            resumen = resumen[:_SPDP_RESUMEN_MAX].rstrip() + "..."
+
+        consultas.append(
+            {
+                "fuente": "SPDP",
+                "oficio": oficio,
+                "titulo": titulo or oficio,
+                "preguntas": preguntas,
+                "analisis": analisis,
+                "pronunciamiento": pronunciamiento,
+                "resumen": resumen,
+                "url": consultas_url,
+            }
+        )
+    return consultas
+
+
+def _spdp_match_query(item: Dict[str, Any], query: str) -> bool:
+    if not query:
+        return True
+    q = _spdp_norm_text(query)
+    haystack = _spdp_norm_text(
+        " ".join(
+            [
+                item.get("titulo", ""),
+                item.get("oficio", ""),
+                " ".join(item.get("preguntas") or []),
+                item.get("analisis", ""),
+                item.get("pronunciamiento", ""),
+                item.get("resumen", ""),
+            ]
+        )
+    )
+    return q in haystack
+
+
+def _spdp_match_oficio(item: Dict[str, Any], oficio: str) -> bool:
+    if not oficio:
+        return True
+    return _spdp_norm_text(oficio) in _spdp_norm_text(item.get("oficio") or item.get("titulo") or "")
+
+
+def consultar_spdp(payload: Dict[str, Any]) -> Dict[str, Any]:
+    categoria = _spdp_parse_categoria(payload.get("categoria") or payload.get("seccion") or payload.get("tipo") or "")
+    query = (payload.get("texto") or payload.get("query") or payload.get("texto_general") or "").strip()
+    oficio = (payload.get("oficio") or payload.get("numero") or payload.get("num_oficio") or "").strip()
+    detalle = bool(payload.get("detalle"))
+    try:
+        limit = int(payload.get("limit") or payload.get("size") or 5)
+    except Exception:
+        limit = 5
+    if limit < 1:
+        limit = 1
+
+    if categoria in ("guias", "modelos", "circulares"):
+        items = list(_SPDP_STATIC.get(categoria, []))
+        if query:
+            items = [it for it in items if _spdp_match_query(it, query)]
+        total = len(items)
+        return {
+            "mensaje": "Consulta SPDP completada.",
+            "nivel_consulta": "SPDP",
+            "categoria": categoria,
+            "total": total,
+            "resultado": items[:limit],
+        }
+
+    if categoria != "consultas":
+        return {"error": f"Categoria SPDP desconocida: {categoria}", "nivel_consulta": "SPDP"}
+
+    try:
+        html = _fetch_spdp_html(f"{URLS['spdp_base'].rstrip('/')}/consultasatendidas/")
+        items = _parse_spdp_consultas(html)
+    except Exception as e:
+        return {"error": f"No se pudo obtener consultas SPDP: {e}", "nivel_consulta": "SPDP"}
+
+    if oficio:
+        items = [it for it in items if _spdp_match_oficio(it, oficio)]
+        detalle = True
+
+    if query:
+        items = [it for it in items if _spdp_match_query(it, query)]
+
+    total = len(items)
+    if not items:
+        return {
+            "mensaje": "No se encontraron resultados SPDP.",
+            "nivel_consulta": "SPDP",
+            "categoria": categoria,
+            "total": 0,
+            "resultado": [],
+        }
+
+    if detalle:
+        resultado = items[:limit]
+    else:
+        resultado = [
+            {
+                "fuente": it.get("fuente"),
+                "oficio": it.get("oficio"),
+                "titulo": it.get("titulo"),
+                "resumen": it.get("resumen"),
+                "url": it.get("url"),
+            }
+            for it in items[:limit]
+        ]
+
+    return {
+        "mensaje": "Consulta SPDP completada.",
+        "nivel_consulta": "SPDP",
+        "categoria": categoria,
+        "total": total,
+        "resultado": resultado,
+    }
