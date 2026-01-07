@@ -42,6 +42,7 @@ try:
         consultar_procesos_avanzada,
         consultar_procesos_resueltos,
         consultar_juriscopio,
+        consultar_spdp,
     )
     from providers.supercias_connectors import consultar_supercias_companias
     from providers.uafe_connector import consultar_uafe
@@ -56,6 +57,7 @@ except ModuleNotFoundError as e:
     consultar_procesos_avanzada = None
     consultar_procesos_resueltos = None
     consultar_juriscopio = None
+    consultar_spdp = None
     consultar_supercias_companias = None
     consultar_uafe = None
     consultar_sorteos = None
@@ -65,8 +67,6 @@ except ModuleNotFoundError as e:
 # Inicializacion del servicio FastAPI
 # ============================================
 app = FastAPI(title="H&G Abogados IA - Robot Juri­dico Inteligente")
-API_KEY = os.getenv("X_API_KEY")
-API_KEY_DISABLED = os.getenv("DISABLE_API_KEY", "false").lower() == "true"
 DOWNLOAD_TOKEN_SECRET = os.getenv("DOWNLOAD_TOKEN_SECRET", "").strip()
 
 # ============================================
@@ -101,30 +101,6 @@ def _verify_download_token(token: str, secret: str) -> Dict[str, Any]:
     if exp and time.time() > float(exp):
         raise HTTPException(status_code=401, detail="Token de descarga expirado.")
     return payload
-
-# ============================================
-# Middleware de seguridad por API Key
-# ============================================
-@app.middleware("http")
-async def verify_api_key(request: Request, call_next):
-    allowed_routes = [
-        "/",
-        "/health",
-        "/favicon.ico",
-        "/check_fielweb_status",
-        "/check_external_sources",
-        "/check_corte_nacional_status",
-        "/check_corte_constitucional_status",
-        "/check_uafe_status",
-        "/fielweb/download",
-    ]
-    if request.url.path in allowed_routes or API_KEY_DISABLED or not API_KEY:
-        return await call_next(request)
-
-    key = request.headers.get("X-API-Key")
-    if key != API_KEY:
-        raise HTTPException(status_code=401, detail="API Key invÃ¡lida o ausente.")
-    return await call_next(request)
 
 # ============================================
 # Endpoints basicos
@@ -167,7 +143,7 @@ async def fielweb_download_link(payload: dict, request: Request):
 
     concordancias = bool(payload.get("concordancias") or False)
     ttl_seconds = int(payload.get("ttl_seconds") or 600)
-    secret = DOWNLOAD_TOKEN_SECRET or API_KEY
+    secret = DOWNLOAD_TOKEN_SECRET
     if not secret:
         raise HTTPException(status_code=500, detail="DOWNLOAD_TOKEN_SECRET no configurado.")
 
@@ -190,7 +166,7 @@ async def fielweb_download_link(payload: dict, request: Request):
 async def fielweb_download(token: str):
     if not descargar_norma_archivo:
         raise HTTPException(status_code=500, detail="Conector FielWeb no disponible.")
-    secret = DOWNLOAD_TOKEN_SECRET or API_KEY
+    secret = DOWNLOAD_TOKEN_SECRET
     if not secret:
         raise HTTPException(status_code=500, detail="DOWNLOAD_TOKEN_SECRET no configurado.")
     payload = _verify_download_token(token, secret)
@@ -346,6 +322,25 @@ async def consult_uafe_endpoint(payload: dict):
         traceback.print_exc()
         return JSONResponse(
             content={"error": f"Error UAFE: {str(e)}"},
+            status_code=200
+        )
+
+# ============================================
+# Consulta SPDP
+# ============================================
+@app.post("/consult_spdp")
+async def consult_spdp_endpoint(payload: dict):
+    if not consultar_spdp:
+        return JSONResponse(
+            content={"error": "Conector SPDP no disponible."},
+            status_code=200
+        )
+    try:
+        return JSONResponse(content=consultar_spdp(payload), status_code=200)
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(
+            content={"error": f"Error SPDP: {str(e)}"},
             status_code=200
         )
 
@@ -694,7 +689,6 @@ async def check_fielweb_status():
         "url_login": url,
         "conexion_fielweb": conexion_estado,
         "providers": provider_status,
-        "api_key_configurada": "…" if os.getenv("X_API_KEY") else "No definida",
         "debug_mode": os.getenv("DEBUG", "false"),
     }
 
