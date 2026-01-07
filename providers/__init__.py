@@ -98,7 +98,6 @@ def check_providers_status() -> dict:
         "FIELWEB_LOGIN_URL",
         "FIELWEB_USERNAME",
         "FIELWEB_PASSWORD",
-        "X_API_KEY",
     ]
     missing_env = [k for k in env_keys if not os.getenv(k)]
     status["variables_entorno"] = (
