@@ -58,6 +58,12 @@ def _post_json(sess: requests.Session, path: str, payload: Dict[str, Any]) -> Di
     return data
 
 
+def _as_dict(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    return {}
+
+
 def _login_and_token(sess: requests.Session) -> str:
     if not FIELWEB_USERNAME or not FIELWEB_PASSWORD:
         raise RuntimeError("Faltan credenciales FIELWEB_USERNAME/FIELWEB_PASSWORD.")
@@ -70,15 +76,23 @@ def _login_and_token(sess: requests.Session) -> str:
 
     signin_payload = {"u": FIELWEB_USERNAME, "c": FIELWEB_PASSWORD, "r": False, "aQS": False}
     data = _post_json(sess, "/Cuenta/login.aspx/signin", signin_payload)
-    if not data.get("d", {}).get("Respuesta", True):
+    signin = _as_dict(data.get("d"))
+    signin_data = _as_dict(signin.get("Data"))
+    if not signin.get("Respuesta", True):
         raise RuntimeError(f"Login FielWeb falló: {data}")
 
     _post_json(sess, "/Cuenta/login.aspx/aceptoTerminosCondiciones", {"u": FIELWEB_USERNAME})
-
     usuario = _post_json(sess, "/app/main.aspx/traerUsuario", {})
-    token = usuario.get("d", {}).get("Data", {}).get("token")
+    usuario_data = _as_dict(usuario.get("d"))
+    usuario_data_block = _as_dict(usuario_data.get("Data"))
+    token = (
+        usuario_data_block.get("tk")
+        or usuario_data_block.get("token")
+        or signin_data.get("tk")
+        or signin_data.get("token")
+    )  # token de sesión
     if not token:
-        raise RuntimeError("No se obtuvo token desde traerUsuario.")
+        raise RuntimeError(f"No se obtuvo token desde traerUsuario: {usuario}")
     return token
 
 
