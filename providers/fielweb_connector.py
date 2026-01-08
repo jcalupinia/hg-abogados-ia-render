@@ -196,7 +196,8 @@ def _generar_doc(
     }
     try:
         resp = _post_json(sess, ep, payload)
-        ruta = resp.get("d", {}).get("Data")
+        resp_d = _as_dict(resp.get("d"))
+        ruta = resp_d.get("Data")
         if not ruta:
             return None
         ruta_enc = ruta.replace("\\", "\\\\")
@@ -365,13 +366,16 @@ def _buscar(
         "reformas": reformas,
     }
     data = _post_json(sess, "/app/tpl/buscador/busquedas.aspx/buscar", payload)
-    resultado = data.get("d", {}).get("Data") or []
+    data_block = _as_dict(data.get("d"))
+    resultado = data_block.get("Data") or []
     if isinstance(limite_resultados, int) and limite_resultados > 0:
         resultado = resultado[:limite_resultados]
-    mapped = [_map_result(r, descargar_pdf, sess) for r in resultado]
+    mapped = [_map_result(r, descargar_pdf, sess) for r in resultado if isinstance(r, dict)]
 
     if incluir_descargas:
         for idx, r in enumerate(resultado):
+            if not isinstance(r, dict):
+                continue
             norma_id = r.get("normaID")
             titulo = r.get("titulo") or ""
             if not norma_id:
@@ -402,7 +406,8 @@ def _buscar(
 def _traer_detalle_norma(sess: requests.Session, norma_id: int) -> Optional[Dict[str, Any]]:
     try:
         data = _post_json(sess, "/app/tpl/norma/norma.aspx/traerDetalleNorma", {"idNorma": norma_id})
-        return data.get("d", {}).get("Data")
+        data_block = _as_dict(data.get("d"))
+        return data_block.get("Data")
     except Exception:
         return None
 
@@ -418,7 +423,8 @@ def _traer_parte_norma(
             "/app/tpl/norma/norma.aspx/traerParteNorma",
             {"id": norma_id, "d": d_value, "h": h_value},
         )
-        return data.get("d", {}).get("Data")
+        data_block = _as_dict(data.get("d"))
+        return data_block.get("Data")
     except Exception:
         return None
 
