@@ -370,28 +370,28 @@ def _buscar(
     resultado = data_block.get("Data") or []
     if isinstance(limite_resultados, int) and limite_resultados > 0:
         resultado = resultado[:limite_resultados]
-    mapped = [_map_result(r, descargar_pdf, sess) for r in resultado if isinstance(r, dict)]
-
-    if incluir_descargas:
-        for idx, r in enumerate(resultado):
-            if not isinstance(r, dict):
-                continue
+    mapped: List[Dict[str, Any]] = []
+    for r in resultado:
+        if not isinstance(r, dict):
+            continue
+        mapped_item = _map_result(r, descargar_pdf, sess)
+        if incluir_descargas:
             norma_id = r.get("normaID")
             titulo = r.get("titulo") or ""
-            if not norma_id:
-                continue
-            try:
-                nid = int(norma_id)
-            except Exception:
-                continue
-            # Construir descargas para pdf/word/html con y sin concordancias
-            for fmt in ("pdf", "word", "html"):
-                sin = _generar_doc(sess, nid, titulo, False, fmt, include_content=incluir_descargas)
-                con = _generar_doc(sess, nid, titulo, True, fmt, include_content=incluir_descargas)
-                key_sin = f"{fmt}_sin"
-                key_con = f"{fmt}_con"
-                mapped[idx].setdefault("descargas", {})[key_sin] = sin
-                mapped[idx].setdefault("descargas", {})[key_con] = con
+            if norma_id:
+                try:
+                    nid = int(norma_id)
+                except Exception:
+                    nid = None
+                if nid:
+                    for fmt in ("pdf", "word", "html"):
+                        sin = _generar_doc(sess, nid, titulo, False, fmt, include_content=incluir_descargas)
+                        con = _generar_doc(sess, nid, titulo, True, fmt, include_content=incluir_descargas)
+                        key_sin = f"{fmt}_sin"
+                        key_con = f"{fmt}_con"
+                        mapped_item.setdefault("descargas", {})[key_sin] = sin
+                        mapped_item.setdefault("descargas", {})[key_con] = con
+        mapped.append(mapped_item)
     return {
         "mensaje": f"Resultados para '{texto}'",
         "nivel_consulta": "FielWeb",
@@ -441,6 +441,9 @@ def consultar_fielweb(payload: Dict[str, Any]) -> Dict[str, Any]:
       - parte_d / parte_h (opcionales): si se envían junto a norma_id, traerParteNorma y devolver la lista de textos.
       - descargas (bool, opcional): si True, devuelve rutas y URLs de descarga (pdf/word/html con/sin concordancias).
     """
+    if not isinstance(payload, dict):
+        return {"error": "Payload inválido (se esperaba objeto JSON).", "nivel_consulta": "FielWeb"}
+
     texto = (payload.get("texto") or payload.get("consulta") or "").strip()
     if not texto:
         return {"error": "Debe proporcionar 'texto' o 'consulta'."}
