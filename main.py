@@ -7,6 +7,7 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, Field
 import os, traceback, asyncio
 import requests
 from typing import Optional, Dict, Any, List
@@ -69,6 +70,27 @@ except ModuleNotFoundError as e:
 app = FastAPI(title="H&G Abogados IA - Robot Juri­dico Inteligente")
 DOWNLOAD_TOKEN_SECRET = os.getenv("DOWNLOAD_TOKEN_SECRET", "").strip()
 
+
+class ConsultarFielwebRequest(BaseModel):
+    texto: str = Field(..., description="Termino de busqueda.")
+    seccion: Optional[int] = Field(1, description="Seccion (1 vigente, 2 historica, etc).")
+    reformas: Optional[str] = Field("2", description="Pestana de reformas (\"2\" = Todo).")
+    page: Optional[int] = Field(1, description="Pagina de resultados.")
+    limite_resultados: Optional[int] = Field(None, description="Limita la cantidad de resultados devueltos.")
+    descargar_pdf: Optional[bool] = Field(False, description="Si es true intenta adjuntar pdf_base64 de RO.")
+    descargas: Optional[bool] = Field(False, description="Incluye rutas y links de descarga por formato.")
+    norma_id: Optional[int] = Field(None, description="Solicita el detalle puntual de una norma.")
+    parte_d: Optional[int] = Field(None, description="Indice inicial del bloque de articulos cuando se consulta norma_id.")
+    parte_h: Optional[int] = Field(None, description="Indice final del bloque de articulos cuando se consulta norma_id.")
+    # Alias utiles para compatibilidad con el conector
+    consulta: Optional[str] = Field(None, description="Alias de texto.")
+    max_resultados: Optional[int] = Field(None, description="Alias de limite_resultados.")
+    limit: Optional[int] = Field(None, description="Alias de limite_resultados.")
+
+    class Config:
+        extra = "allow"
+        allow_population_by_field_name = True
+
 # ============================================
 # Helpers para enlaces de descarga firmados (FielWeb)
 # ============================================
@@ -117,11 +139,15 @@ async def health():
 # Consultas FielWeb
 # ============================================
 @app.post("/consult_real_fielweb")
-async def consult_fielweb_endpoint(payload: dict):
+async def consult_fielweb_endpoint(payload: ConsultarFielwebRequest):
     if not consultar_fielweb:
         raise HTTPException(status_code=500, detail="Conector FielWeb no disponible.")
     try:
-        return await run_in_threadpool(consultar_fielweb, payload)
+        try:
+            payload_dict = payload.model_dump(exclude_none=True)
+        except AttributeError:
+            payload_dict = payload.dict(exclude_none=True)
+        return await run_in_threadpool(consultar_fielweb, payload_dict)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error FielWeb: {str(e)}")
