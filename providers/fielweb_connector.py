@@ -268,7 +268,8 @@ def descargar_norma_archivo(
 
 
 def _map_result(item: Dict[str, Any], descargar_pdf: bool, sess: requests.Session) -> Dict[str, Any]:
-    ro_info = _build_ro_links(item.get("registroOficialImagen") or {})
+    reg_img = _as_dict(item.get("registroOficialImagen"))
+    ro_info = _build_ro_links(reg_img)
     pdf_info = None
     if descargar_pdf:
         pdf_info = _download_pdf(
@@ -276,7 +277,7 @@ def _map_result(item: Dict[str, Any], descargar_pdf: bool, sess: requests.Sessio
             ro_info.get("nav"),
             ro_info.get("tpag"),
             ro_info.get("pag"),
-            item.get("registroOficialImagen", {}).get("NombreResultados") or item.get("fuente"),
+            reg_img.get("NombreResultados") or item.get("fuente"),
         )
     return {
         "area_principal": item.get("area"),
@@ -292,8 +293,8 @@ def _map_result(item: Dict[str, Any], descargar_pdf: bool, sess: requests.Sessio
         "norma_id": item.get("normaID"),
         "aciertos": item.get("aciertos"),
         "registro_oficial": {
-            "titulo": item.get("registroOficialImagen", {}).get("NombreResultados") or item.get("fuente"),
-            "raw_url": item.get("registroOficialImagen", {}).get("Url"),
+            "titulo": reg_img.get("NombreResultados") or item.get("fuente"),
+            "raw_url": reg_img.get("Url"),
             **ro_info,
             # Endpoint de descarga PDF: requiere POST con HTML (payload observado en generarPDF)
             "download_endpoint": f"{FIELWEB_BASE}/app/tpl/visualizador/visualizador.aspx/generarPDF",
@@ -368,6 +369,10 @@ def _buscar(
     data = _post_json(sess, "/app/tpl/buscador/busquedas.aspx/buscar", payload)
     data_block = _as_dict(data.get("d"))
     resultado = data_block.get("Data") or []
+    if isinstance(resultado, dict):
+        resultado = [resultado]
+    if not isinstance(resultado, list):
+        resultado = []
     if isinstance(limite_resultados, int) and limite_resultados > 0:
         resultado = resultado[:limite_resultados]
     mapped: List[Dict[str, Any]] = []
