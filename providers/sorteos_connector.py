@@ -112,6 +112,16 @@ def buscar_sorteos(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _map_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
+    uuid_val = doc.get("uuid") or doc.get("uuidDocumento") or ""
+    carpeta = (doc.get("carpeta") or "tramite").strip() or "tramite"
+    if uuid_val.startswith("http://") or uuid_val.startswith("https://"):
+        download_url = uuid_val
+    elif uuid_val:
+        payload = {"carpeta": carpeta, "uuid": uuid_val}
+        token = base64.b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii")
+        download_url = f"{BASE_URL}/storage/api/v1/10_DWL_FL/{token}"
+    else:
+        download_url = None
     return {
         "id": doc.get("id"),
         "nombre": doc.get("nombreDocumento") or doc.get("nombre"),
@@ -120,7 +130,8 @@ def _map_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
         "uuidDocumento": doc.get("uuidDocumento"),
         "fecha_carga": doc.get("fechaCarga"),
         "repositorio": doc.get("repositorio"),
-        "url": doc.get("uuid") or doc.get("uuidDocumento"),
+        "url": download_url,
+        "download_url": download_url,
     }
 
 
