@@ -764,28 +764,31 @@ def _paginacion_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"page": page, "pageSize": size, "total": 0, "contar": True}
 
 
-def _map_doc_item(doc: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "id": doc.get("id"),
-        "nombre": doc.get("nombreDocumento") or doc.get("nombre"),
-        "carpeta": doc.get("carpeta"),
-        "uuid": doc.get("uuid"),
-        "uuidDocumento": doc.get("uuidDocumento"),
-        "fecha_carga": doc.get("fechaCarga"),
-        "repositorio": doc.get("repositorio"),
-        "url": doc.get("uuid") or doc.get("uuidDocumento"),
-    }
+def _cc_download_url(uuid_val: Optional[str], carpeta: Optional[str]) -> Optional[str]:
+    if not uuid_val:
+        return None
+    if uuid_val.startswith("http://") or uuid_val.startswith("https://"):
+        return uuid_val
+    base = "https://esacc.corteconstitucional.gob.ec/storage/api/v1/10_DWL_FL/"
+    payload = {"carpeta": (carpeta or "tramite").strip() or "tramite", "uuid": uuid_val}
+    token = base64.b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii")
+    return f"{base}{token}"
+
 
 def _map_doc_item(doc: Dict[str, Any]) -> Dict[str, Any]:
+    uuid_val = doc.get("uuid") or doc.get("uuidDocumento") or ""
+    carpeta = doc.get("carpeta")
+    download_url = _cc_download_url(uuid_val, carpeta)
     return {
         "id": doc.get("id"),
         "nombre": doc.get("nombreDocumento") or doc.get("nombre"),
-        "carpeta": doc.get("carpeta"),
+        "carpeta": carpeta,
         "uuid": doc.get("uuid"),
         "uuidDocumento": doc.get("uuidDocumento"),
         "fecha_carga": doc.get("fechaCarga"),
         "repositorio": doc.get("repositorio"),
-        "url": doc.get("uuid") or doc.get("uuidDocumento"),
+        "url": download_url,
+        "download_url": download_url,
     }
 
 
