@@ -44,6 +44,7 @@ try:
         consultar_procesos_resueltos,
         consultar_juriscopio,
         consultar_spdp,
+        exportar_pdf_satje,
     )
     from providers.supercias_connectors import consultar_supercias_companias
     from providers.uafe_connector import consultar_uafe
@@ -59,6 +60,7 @@ except ModuleNotFoundError as e:
     consultar_procesos_resueltos = None
     consultar_juriscopio = None
     consultar_spdp = None
+    exportar_pdf_satje = None
     consultar_supercias_companias = None
     consultar_uafe = None
     consultar_sorteos = None
@@ -229,6 +231,65 @@ async def fielweb_download(token: str):
     filename = result.get("filename") or f"norma_{norma_id}.{formato}"
     headers = {"Content-Disposition": f'inline; filename="{filename}"'}
     return Response(content=result["content_bytes"], media_type=content_type, headers=headers)
+
+# ============================================
+# Exportar PDF SATJE (procesos judiciales)
+# ============================================
+@app.post("/satje/export_pdf_link")
+async def satje_export_pdf_link(payload: dict, request: Request):
+    id_juicio = payload.get("id_juicio") or payload.get("idJuicio") or payload.get("numero_causa")
+    if not id_juicio:
+        raise HTTPException(status_code=400, detail="Debe proporcionar id_juicio o numero_causa.")
+
+    try:
+        max_actuaciones = int(payload.get("max_actuaciones") or 200)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="max_actuaciones invalido.") from exc
+    if max_actuaciones < 1:
+        max_actuaciones = 1
+
+    ttl_seconds = int(payload.get("ttl_seconds") or 600)
+    secret = DOWNLOAD_TOKEN_SECRET
+    if not secret:
+        raise HTTPException(status_code=500, detail="DOWNLOAD_TOKEN_SECRET no configurado.")
+
+    exp = int(time.time()) + ttl_seconds
+    token_payload = {
+        "id_juicio": str(id_juicio),
+        "max_actuaciones": max_actuaciones,
+        "exp": exp,
+    }
+    token = _sign_download_payload(token_payload, secret)
+    base_url = str(request.base_url).rstrip("/")
+    return {
+        "download_url": f"{base_url}/satje/export_pdf?token={token}",
+        "exp": exp,
+    }
+
+
+@app.get("/satje/export_pdf")
+async def satje_export_pdf(token: str):
+    if not exportar_pdf_satje:
+        raise HTTPException(status_code=500, detail="Conector SATJE no disponible.")
+    secret = DOWNLOAD_TOKEN_SECRET
+    if not secret:
+        raise HTTPException(status_code=500, detail="DOWNLOAD_TOKEN_SECRET no configurado.")
+    payload = _verify_download_token(token, secret)
+
+    try:
+        result = await run_in_threadpool(exportar_pdf_satje, payload)
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error SATJE PDF: {exc}") from exc
+    if not result:
+        raise HTTPException(status_code=502, detail="No se pudo generar el PDF.")
+    if result.get("error"):
+        raise HTTPException(status_code=502, detail=result["error"])
+
+    content = result.get("content") or b""
+    filename = result.get("filename") or "satje_export.pdf"
+    headers = {"Content-Disposition": f'inline; filename=\"{filename}\"'}
+    return Response(content=content, media_type="application/pdf", headers=headers)
 
 # ============================================
 # Consultas Jurisprudenciales
