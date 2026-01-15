@@ -3,6 +3,7 @@ import asyncio
 import base64
 import json
 import re
+import textwrap
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin, quote
@@ -133,7 +134,14 @@ def _norm_fecha(valor: Any) -> str:
 def _pdf_safe_text(value: Any) -> str:
     if value is None:
         return ""
-    return str(value).encode("latin-1", "replace").decode("latin-1")
+    text = str(value)
+    # Evita errores de fpdf por palabras demasiado largas sin espacios.
+    text = re.sub(
+        r"(\S{80,})",
+        lambda m: " ".join(textwrap.wrap(m.group(0), 80)),
+        text,
+    )
+    return text.encode("latin-1", "replace").decode("latin-1")
 
 
 def _pdf_section(pdf: FPDF, title: str, lines: List[str]) -> None:
