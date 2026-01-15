@@ -135,6 +135,7 @@ def _pdf_safe_text(value: Any) -> str:
     if value is None:
         return ""
     text = str(value)
+    text = text.replace("\r", " ").replace("\t", " ")
     # Evita errores de fpdf por palabras demasiado largas sin espacios.
     text = re.sub(
         r"(\S{80,})",
@@ -148,12 +149,14 @@ def _pdf_section(pdf: FPDF, title: str, lines: List[str]) -> None:
     if not lines:
         return
     pdf.set_font("Helvetica", "B", 11)
+    pdf.set_x(pdf.l_margin)
     pdf.multi_cell(0, 6, _pdf_safe_text(title))
     pdf.set_font("Helvetica", size=9)
     for line in lines:
         line = line or ""
         if not line.strip():
             continue
+        pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, 5, _pdf_safe_text(line))
     pdf.ln(1)
 
@@ -167,9 +170,11 @@ def _build_satje_pdf(
     errores: List[str],
 ) -> bytes:
     pdf = FPDF()
+    pdf.set_margins(12, 12, 12)
     pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 14)
+    pdf.set_x(pdf.l_margin)
     pdf.cell(0, 9, _pdf_safe_text("E-SATJE 2020 - Exportar PDF"), ln=True)
     pdf.set_font("Helvetica", size=9)
 
@@ -203,6 +208,7 @@ def _build_satje_pdf(
 
     if actuaciones:
         pdf.set_font("Helvetica", "B", 11)
+        pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, 6, _pdf_safe_text("Actuaciones judiciales"))
         pdf.set_font("Helvetica", size=9)
         for idx, act in enumerate(actuaciones[:max_actuaciones], 1):
@@ -217,6 +223,7 @@ def _build_satje_pdf(
                 ["actividad", "detalle", "observacion", "texto", "nombreActuacion"],
             )
             linea = f"{idx}. {fecha} - {tipo} - {detalle}".strip(" -")
+            pdf.set_x(pdf.l_margin)
             pdf.multi_cell(0, 5, _pdf_safe_text(linea))
         pdf.ln(1)
     else:
