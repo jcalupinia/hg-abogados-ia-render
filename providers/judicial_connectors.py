@@ -9,6 +9,7 @@ from urllib.parse import urljoin, quote
 import requests
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
+from fpdf import FPDF
 
 # ================================
 # ⚙️ CONFIGURACIÓN GLOBAL Y DEBUG
@@ -128,6 +129,95 @@ def _norm_fecha(valor: Any) -> str:
     except Exception:
         return ""
     return ""
+
+def _pdf_safe_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).encode("latin-1", "replace").decode("latin-1")
+
+
+def _pdf_section(pdf: FPDF, title: str, lines: List[str]) -> None:
+    if not lines:
+        return
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.multi_cell(0, 6, _pdf_safe_text(title))
+    pdf.set_font("Helvetica", size=9)
+    for line in lines:
+        line = line or ""
+        if not line.strip():
+            continue
+        pdf.multi_cell(0, 5, _pdf_safe_text(line))
+    pdf.ln(1)
+
+
+def _build_satje_pdf(
+    id_juicio: str,
+    informacion: Dict[str, Any],
+    incidencias: List[Dict[str, Any]],
+    actuaciones: List[Dict[str, Any]],
+    max_actuaciones: int,
+    errores: List[str],
+) -> bytes:
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 9, _pdf_safe_text("E-SATJE 2020 - Exportar PDF"), ln=True)
+    pdf.set_font("Helvetica", size=9)
+
+    numero_proceso = (
+        informacion.get("idJuicio")
+        or informacion.get("numeroCausa")
+        or informacion.get("numeroJuicio")
+        or id_juicio
+    )
+    datos_generales = [
+        f"Numero de proceso: {numero_proceso}",
+        f"Materia: {informacion.get('nombreMateria') or ''}",
+        f"Tipo de accion: {informacion.get('nombreTipoAccion') or ''}",
+        f"Delito/Asunto: {informacion.get('nombreDelito') or ''}",
+        f"Fecha de ingreso: {_norm_fecha(informacion.get('fechaIngreso'))}",
+        f"Judicatura: {informacion.get('nombreJudicatura') or ''}",
+        f"Actor/Ofendido: {informacion.get('nombreActor') or ''}",
+        f"Demandado/Procesado: {informacion.get('nombreDemandado') or ''}",
+    ]
+    _pdf_section(pdf, "Datos generales", datos_generales)
+
+    if incidencias:
+        inc = incidencias[0]
+        incidente_lineas = [
+            f"Incidente: {inc.get('incidente') or ''}",
+            f"Id incidente judicatura: {inc.get('idIncidenteJudicatura') or ''}",
+            f"Id movimiento incidente: {inc.get('idMovimientoJuicioIncidente') or ''}",
+            f"Fecha incidente: {_norm_fecha(inc.get('fechaIngreso'))}",
+        ]
+        _pdf_section(pdf, "Incidente", incidente_lineas)
+
+    if actuaciones:
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.multi_cell(0, 6, _pdf_safe_text("Actuaciones judiciales"))
+        pdf.set_font("Helvetica", size=9)
+        for idx, act in enumerate(actuaciones[:max_actuaciones], 1):
+            fecha = _norm_fecha(
+                act.get("fechaIngreso")
+                or act.get("fechaActuacion")
+                or act.get("fecha")
+            )
+            tipo = _pick(act, ["tipo", "tipoActuacion", "nombreTipoActuacion"])
+            detalle = _pick(
+                act,
+                ["actividad", "detalle", "observacion", "texto", "nombreActuacion"],
+            )
+            linea = f"{idx}. {fecha} - {tipo} - {detalle}".strip(" -")
+            pdf.multi_cell(0, 5, _pdf_safe_text(linea))
+        pdf.ln(1)
+    else:
+        _pdf_section(pdf, "Actuaciones judiciales", ["No se encontraron actuaciones."])
+
+    if errores:
+        _pdf_section(pdf, "Observaciones tecnicas", errores)
+
+    return pdf.output(dest="S").encode("latin-1")
 
 def _headers_juriscopio(referer: str) -> Dict[str, str]:
     return {
@@ -1347,6 +1437,71 @@ def consultar_procesos_avanzada(payload: Dict[str, Any]) -> Dict[str, Any]:
         detalle["incidencias_error"] = str(e)
 
     return {**res_busqueda, "detalle": detalle}
+
+
+def exportar_pdf_satje(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Genera un PDF del resumen del proceso judicial (equivalente a "Exportar PDF").
+    Requiere idJuicio o numero_causa.
+    """
+    id_juicio = payload.get("idJuicio") or payload.get("id_juicio") or payload.get("numero_causa")
+    if not id_juicio:
+        return {"error": "Debe proporcionar idJuicio o numero_causa."}
+
+    try:
+        max_actuaciones = int(payload.get("max_actuaciones") or 200)
+    except Exception:
+        max_actuaciones = 200
+    if max_actuaciones < 1:
+        max_actuaciones = 1
+
+    informacion: Dict[str, Any] = {}
+    incidencias: List[Dict[str, Any]] = []
+    actuaciones: List[Dict[str, Any]] = []
+    errores: List[str] = []
+
+    try:
+        informacion = _get_informacion_juicio(str(id_juicio))
+    except Exception as e:
+        errores.append(f"No se pudo obtener informacion del juicio: {e}")
+
+    try:
+        incidencias = _get_incidente_judicatura(str(id_juicio))
+    except Exception as e:
+        errores.append(f"No se pudieron obtener incidencias: {e}")
+
+    if incidencias:
+        inc = incidencias[0]
+        act_payload = {
+            "aplicativo": "web",
+            "idIncidenteJudicatura": inc.get("idIncidenteJudicatura"),
+            "idJudicatura": inc.get("idJudicatura"),
+            "idJuicio": str(id_juicio),
+            "idMovimientoJuicioIncidente": inc.get("idMovimientoJuicioIncidente"),
+            "incidente": inc.get("incidente") or 1,
+            "nombreJudicatura": inc.get("nombreJudicatura"),
+        }
+        try:
+            actuaciones = _get_actuaciones(act_payload)
+        except Exception as e:
+            errores.append(f"No se pudieron obtener actuaciones: {e}")
+    else:
+        errores.append("No se encontraron incidencias para este juicio.")
+
+    pdf_bytes = _build_satje_pdf(
+        str(id_juicio),
+        informacion,
+        incidencias,
+        actuaciones,
+        max_actuaciones,
+        errores,
+    )
+    filename = f"satje_{id_juicio}.pdf"
+    return {
+        "content": pdf_bytes,
+        "filename": filename,
+        "content_type": "application/pdf",
+    }
 
 
 # ============================================================
