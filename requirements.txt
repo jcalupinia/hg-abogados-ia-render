@@ -30,5 +30,5 @@ charset-normalizer==3.4.0
 
 # ---- EVENT LOOP FIX ----
 nest_asyncio==1.6.0
-
+fpdf2==2.7.9
 
