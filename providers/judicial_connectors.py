@@ -145,6 +145,19 @@ def _pdf_safe_text(value: Any) -> str:
     return text.encode("latin-1", "replace").decode("latin-1")
 
 
+def _html_to_text(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    if "<" in text and ">" in text:
+        try:
+            soup = BeautifulSoup(text, "lxml")
+            text = soup.get_text(" ", strip=True)
+        except Exception:
+            text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _pdf_section(pdf: FPDF, title: str, lines: List[str]) -> None:
     if not lines:
         return
@@ -222,6 +235,7 @@ def _build_satje_pdf(
                 act,
                 ["actividad", "detalle", "observacion", "texto", "nombreActuacion"],
             )
+            detalle = _html_to_text(detalle)
             linea = f"{idx}. {fecha} - {tipo} - {detalle}".strip(" -")
             pdf.set_x(pdf.l_margin)
             pdf.multi_cell(0, 5, _pdf_safe_text(linea))
@@ -1518,7 +1532,10 @@ def exportar_pdf_satje(payload: Dict[str, Any]) -> Dict[str, Any]:
             errores.append(f"No se pudieron obtener incidencias: {e}")
 
     if incidencias:
-        inc = incidencias[0]
+        inc = next(
+            (it for it in incidencias if it.get("idMovimientoJuicioIncidente")),
+            incidencias[0],
+        )
         act_payload = {
             "aplicativo": "web",
             "idIncidenteJudicatura": inc.get("idIncidenteJudicatura"),
@@ -1529,13 +1546,18 @@ def exportar_pdf_satje(payload: Dict[str, Any]) -> Dict[str, Any]:
             "nombreJudicatura": inc.get("nombreJudicatura"),
         }
         try:
-            actuaciones_raw = _get_actuaciones(act_payload)
-            if isinstance(actuaciones_raw, dict):
-                actuaciones = actuaciones_raw.get("actuaciones") or actuaciones_raw.get("resultado") or []
-            elif isinstance(actuaciones_raw, list):
-                actuaciones = actuaciones_raw
+            required = ("idIncidenteJudicatura", "idJudicatura", "idMovimientoJuicioIncidente")
+            missing = [key for key in required if not act_payload.get(key)]
+            if missing:
+                errores.append(f"Faltan campos para actuaciones: {', '.join(missing)}")
             else:
-                actuaciones = []
+                actuaciones_raw = _get_actuaciones(act_payload)
+                if isinstance(actuaciones_raw, dict):
+                    actuaciones = actuaciones_raw.get("actuaciones") or actuaciones_raw.get("resultado") or []
+                elif isinstance(actuaciones_raw, list):
+                    actuaciones = actuaciones_raw
+                else:
+                    actuaciones = []
         except Exception as e:
             errores.append(f"No se pudieron obtener actuaciones: {e}")
     else:
