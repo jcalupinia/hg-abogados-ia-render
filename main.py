@@ -259,6 +259,16 @@ async def satje_export_pdf_link(payload: dict, request: Request):
         "max_actuaciones": max_actuaciones,
         "exp": exp,
     }
+    # Campos opcionales para obtener actuaciones completas
+    for key in (
+        "idMovimientoJuicioIncidente",
+        "idIncidenteJudicatura",
+        "idJudicatura",
+        "incidente",
+        "nombreJudicatura",
+    ):
+        if payload.get(key) is not None:
+            token_payload[key] = payload.get(key)
     token = _sign_download_payload(token_payload, secret)
     base_url = str(request.base_url).rstrip("/")
     return {
