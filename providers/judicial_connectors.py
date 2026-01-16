@@ -1479,12 +1479,24 @@ def exportar_pdf_satje(payload: Dict[str, Any]) -> Dict[str, Any]:
     errores: List[str] = []
 
     try:
-        informacion = _get_informacion_juicio(str(id_juicio))
+        info_raw = _get_informacion_juicio(str(id_juicio))
+        if isinstance(info_raw, list):
+            informacion = info_raw[0] if info_raw and isinstance(info_raw[0], dict) else {}
+        elif isinstance(info_raw, dict):
+            informacion = info_raw
+        else:
+            informacion = {}
     except Exception as e:
         errores.append(f"No se pudo obtener informacion del juicio: {e}")
 
     try:
-        incidencias = _get_incidente_judicatura(str(id_juicio))
+        inc_raw = _get_incidente_judicatura(str(id_juicio))
+        if isinstance(inc_raw, dict):
+            incidencias = [inc_raw]
+        elif isinstance(inc_raw, list):
+            incidencias = inc_raw
+        else:
+            incidencias = []
     except Exception as e:
         errores.append(f"No se pudieron obtener incidencias: {e}")
 
