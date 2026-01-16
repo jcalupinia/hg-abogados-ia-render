@@ -1478,6 +1478,12 @@ def exportar_pdf_satje(payload: Dict[str, Any]) -> Dict[str, Any]:
     actuaciones: List[Dict[str, Any]] = []
     errores: List[str] = []
 
+    id_movimiento = payload.get("idMovimientoJuicioIncidente") or payload.get("id_movimiento")
+    id_incidente = payload.get("idIncidenteJudicatura") or payload.get("id_incidente")
+    id_judicatura = payload.get("idJudicatura") or payload.get("id_judicatura")
+    incidente_num = payload.get("incidente")
+    nombre_judicatura = payload.get("nombreJudicatura") or payload.get("nombre_judicatura")
+
     try:
         info_raw = _get_informacion_juicio(str(id_juicio))
         if isinstance(info_raw, list):
@@ -1489,16 +1495,27 @@ def exportar_pdf_satje(payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         errores.append(f"No se pudo obtener informacion del juicio: {e}")
 
-    try:
-        inc_raw = _get_incidente_judicatura(str(id_juicio))
-        if isinstance(inc_raw, dict):
-            incidencias = [inc_raw]
-        elif isinstance(inc_raw, list):
-            incidencias = inc_raw
-        else:
-            incidencias = []
-    except Exception as e:
-        errores.append(f"No se pudieron obtener incidencias: {e}")
+    if id_movimiento and id_judicatura:
+        incidencias = [
+            {
+                "idMovimientoJuicioIncidente": id_movimiento,
+                "idIncidenteJudicatura": id_incidente,
+                "idJudicatura": id_judicatura,
+                "incidente": incidente_num,
+                "nombreJudicatura": nombre_judicatura,
+            }
+        ]
+    else:
+        try:
+            inc_raw = _get_incidente_judicatura(str(id_juicio))
+            if isinstance(inc_raw, dict):
+                incidencias = [inc_raw]
+            elif isinstance(inc_raw, list):
+                incidencias = inc_raw
+            else:
+                incidencias = []
+        except Exception as e:
+            errores.append(f"No se pudieron obtener incidencias: {e}")
 
     if incidencias:
         inc = incidencias[0]
@@ -1512,7 +1529,13 @@ def exportar_pdf_satje(payload: Dict[str, Any]) -> Dict[str, Any]:
             "nombreJudicatura": inc.get("nombreJudicatura"),
         }
         try:
-            actuaciones = _get_actuaciones(act_payload)
+            actuaciones_raw = _get_actuaciones(act_payload)
+            if isinstance(actuaciones_raw, dict):
+                actuaciones = actuaciones_raw.get("actuaciones") or actuaciones_raw.get("resultado") or []
+            elif isinstance(actuaciones_raw, list):
+                actuaciones = actuaciones_raw
+            else:
+                actuaciones = []
         except Exception as e:
             errores.append(f"No se pudieron obtener actuaciones: {e}")
     else:
