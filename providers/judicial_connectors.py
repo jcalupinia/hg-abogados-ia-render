@@ -232,7 +232,10 @@ def _build_satje_pdf(
     if errores:
         _pdf_section(pdf, "Observaciones tecnicas", errores)
 
-    return pdf.output(dest="S").encode("latin-1")
+    output = pdf.output(dest="S")
+    if isinstance(output, (bytes, bytearray)):
+        return bytes(output)
+    return output.encode("latin-1")
 
 def _headers_juriscopio(referer: str) -> Dict[str, str]:
     return {
