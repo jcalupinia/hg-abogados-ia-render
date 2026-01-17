@@ -28,6 +28,7 @@ FIELWEB_PASSWORD = os.getenv("FIELWEB_PASSWORD", "").strip()
 DEFAULT_REFORMAS = "2"  # pestaña "Todo" en el front
 DEFAULT_SECCION = 1     # s=1 observado en búsquedas
 DEFAULT_PAGE = 1
+DEFAULT_JURIS_PAGE = -1
 DEFAULT_JURIS_OPCION = "1"  # "Todas las palabras con aproximaciones"
 DEFAULT_JURIS_ORDEN = "1"
 DEFAULT_JURIS_TIPO_FECHA = "1"
@@ -627,10 +628,16 @@ def consultar_fielweb_jurisprudencia_ia(payload: Dict[str, Any]) -> Dict[str, An
 
     texto = (payload.get("texto") or payload.get("consulta") or "").strip()
 
+    page_raw = payload.get("page")
+    if page_raw is None:
+        page_raw = payload.get("p")
     try:
-        page = int(payload.get("page") or DEFAULT_PAGE)
+        if page_raw is None:
+            page = DEFAULT_JURIS_PAGE
+        else:
+            page = int(page_raw)
     except Exception:
-        page = DEFAULT_PAGE
+        page = DEFAULT_JURIS_PAGE
 
     opcion = str(payload.get("opcion") or payload.get("modo") or DEFAULT_JURIS_OPCION)
     orden = str(payload.get("orden") or payload.get("ord") or DEFAULT_JURIS_ORDEN)
