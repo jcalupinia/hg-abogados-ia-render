@@ -16,6 +16,7 @@ endpoint para usos posteriores.
 
 import os
 import base64
+import json
 import requests
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin, parse_qs
@@ -65,6 +66,13 @@ def _post_json(sess: requests.Session, path: str, payload: Dict[str, Any]) -> Di
 def _as_dict(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict):
         return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
     return {}
 
 
