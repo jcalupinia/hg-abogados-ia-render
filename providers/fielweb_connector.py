@@ -626,8 +626,6 @@ def consultar_fielweb_jurisprudencia_ia(payload: Dict[str, Any]) -> Dict[str, An
         return {"error": "Payload invalido (se esperaba objeto JSON).", "nivel_consulta": "FielWeb"}
 
     texto = (payload.get("texto") or payload.get("consulta") or "").strip()
-    if not texto or len(texto) < 3:
-        return {"error": "Debe proporcionar 'texto' (min 3 caracteres).", "nivel_consulta": "FielWeb"}
 
     try:
         page = int(payload.get("page") or DEFAULT_PAGE)
@@ -644,6 +642,18 @@ def consultar_fielweb_jurisprudencia_ia(payload: Dict[str, Any]) -> Dict[str, An
     institucion = payload.get("institucion") or payload.get("i")
     sala = payload.get("sala") or payload.get("s")
     accion = payload.get("accion") or payload.get("a")
+
+    has_filtros = any([institucion, sala, accion, fecha_desde, fecha_hasta])
+    if texto:
+        if len(texto) < 3 and not has_filtros:
+            return {"error": "Debe proporcionar 'texto' (min 3 caracteres).", "nivel_consulta": "FielWeb"}
+        if len(texto) < 3 and has_filtros:
+            texto = ""
+    elif not has_filtros:
+        return {
+            "error": "Debe proporcionar al menos un filtro: texto (min 3), institucion, sala, accion o rango de fechas.",
+            "nivel_consulta": "FielWeb",
+        }
 
     descargar_pdf = bool(payload.get("descargar_pdf") or False)
     incluir_descargas = bool(payload.get("descargas") or False)
