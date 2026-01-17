@@ -16,7 +16,6 @@ endpoint para usos posteriores.
 
 import os
 import base64
-import json
 import requests
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin, parse_qs
@@ -29,10 +28,6 @@ FIELWEB_PASSWORD = os.getenv("FIELWEB_PASSWORD", "").strip()
 DEFAULT_REFORMAS = "2"  # pestaña "Todo" en el front
 DEFAULT_SECCION = 1     # s=1 observado en búsquedas
 DEFAULT_PAGE = 1
-DEFAULT_JURIS_PAGE = -1
-DEFAULT_JURIS_OPCION = "1"  # "Todas las palabras con aproximaciones"
-DEFAULT_JURIS_ORDEN = "1"
-DEFAULT_JURIS_TIPO_FECHA = "1"
 
 
 def _session() -> requests.Session:
@@ -66,13 +61,6 @@ def _post_json(sess: requests.Session, path: str, payload: Dict[str, Any]) -> Di
 def _as_dict(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict):
         return value
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception:
-            pass
     return {}
 
 
@@ -420,92 +408,6 @@ def _buscar(
     }
 
 
-def _buscar_jurisprudencia_ia(
-    sess: requests.Session,
-    texto: str,
-    opcion: str,
-    page: int,
-    orden: str,
-    tipo_fecha: str,
-    fecha_desde: Optional[str],
-    fecha_hasta: Optional[str],
-    institucion: Optional[Any],
-    sala: Optional[Any],
-    accion: Optional[Any],
-    descargar_pdf: bool,
-    incluir_descargas: bool,
-    limite_resultados: Optional[int],
-) -> Dict[str, Any]:
-    payload = {
-        "t": texto,
-        "o": opcion,
-        "i": institucion,
-        "s": sala,
-        "a": accion,
-        "tf": tipo_fecha,
-        "d": fecha_desde or "",
-        "h": fecha_hasta or "",
-        "p": page,
-        "ord": orden,
-    }
-    data = _post_json(sess, "/app/tpl/jurisprudencias/modulo.aspx/Buscar", payload)
-    data_block = _as_dict(data.get("d"))
-    data_inner = _as_dict(data_block.get("Data"))
-    resultados = data_inner.get("resultados")
-    if not resultados:
-        for key in ("Resultados", "resultado", "Resultado", "items", "Items", "results", "Results"):
-            resultados = data_inner.get(key)
-            if resultados:
-                break
-    if not resultados:
-        nested = _as_dict(data_inner.get("Data"))
-        for key in ("resultados", "Resultados", "resultado", "Resultado", "items", "Items"):
-            resultados = nested.get(key)
-            if resultados:
-                break
-    if resultados is None:
-        resultados = []
-    if isinstance(resultados, dict):
-        resultados = [resultados]
-    if not isinstance(resultados, list):
-        resultados = []
-    if isinstance(limite_resultados, int) and limite_resultados > 0:
-        resultados = resultados[:limite_resultados]
-    mapped: List[Dict[str, Any]] = []
-    for r in resultados:
-        if not isinstance(r, dict):
-            continue
-        mapped_item = _map_result(r, descargar_pdf, sess)
-        if incluir_descargas:
-            norma_id = r.get("normaID")
-            titulo = r.get("titulo") or ""
-            if norma_id:
-                try:
-                    nid = int(norma_id)
-                except Exception:
-                    nid = None
-                if nid:
-                    for fmt in ("pdf", "word", "html"):
-                        sin = _generar_doc(sess, nid, titulo, False, fmt, include_content=incluir_descargas)
-                        con = _generar_doc(sess, nid, titulo, True, fmt, include_content=incluir_descargas)
-                        key_sin = f"{fmt}_sin"
-                        key_con = f"{fmt}_con"
-                        mapped_item.setdefault("descargas", {})[key_sin] = sin
-                        mapped_item.setdefault("descargas", {})[key_con] = con
-        mapped.append(mapped_item)
-    busqueda = _as_dict(data_inner.get("busqueda"))
-    return {
-        "mensaje": f"Resultados Jurisprudencia + IA para '{texto}'",
-        "nivel_consulta": "FielWeb",
-        "texto": texto,
-        "seccion": 5,
-        "pagina": page,
-        "total": busqueda.get("total"),
-        "paginas": busqueda.get("paginas"),
-        "resultado": mapped,
-    }
-
-
 def _traer_detalle_norma(sess: requests.Session, norma_id: int) -> Optional[Dict[str, Any]]:
     try:
         data = _post_json(sess, "/app/tpl/norma/norma.aspx/traerDetalleNorma", {"idNorma": norma_id})
@@ -617,95 +519,3 @@ def consultar_fielweb(payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         return {"error": f"Error FielWeb: {e}", "nivel_consulta": "FielWeb"}
 
-
-def consultar_fielweb_jurisprudencia_ia(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Consulta el Repositorio Jurisprudencia + IA.
-    Parametros:
-      - texto (obligatorio)
-      - page
-      - opcion (modo de busqueda, default "1")
-      - orden (default "1")
-      - tipo_fecha (1=publicacion, 2=emision)
-      - fecha_desde / fecha_hasta (YYYY-MM-DD)
-      - institucion, sala, accion (opcionales)
-      - descargar_pdf, descargas, limite_resultados
-    """
-    if not isinstance(payload, dict):
-        return {"error": "Payload invalido (se esperaba objeto JSON).", "nivel_consulta": "FielWeb"}
-
-    texto = (payload.get("texto") or payload.get("consulta") or "").strip()
-
-    page_raw = payload.get("page")
-    if page_raw is None:
-        page_raw = payload.get("p")
-    try:
-        if page_raw is None:
-            page = DEFAULT_JURIS_PAGE
-        else:
-            page = int(page_raw)
-    except Exception:
-        page = DEFAULT_JURIS_PAGE
-
-    opcion = str(payload.get("opcion") or payload.get("modo") or DEFAULT_JURIS_OPCION)
-    orden = str(payload.get("orden") or payload.get("ord") or DEFAULT_JURIS_ORDEN)
-    tipo_fecha = str(payload.get("tipo_fecha") or payload.get("tf") or DEFAULT_JURIS_TIPO_FECHA)
-
-    fecha_desde = payload.get("fecha_desde") or payload.get("desde") or payload.get("d")
-    fecha_hasta = payload.get("fecha_hasta") or payload.get("hasta") or payload.get("h")
-
-    institucion = payload.get("institucion") or payload.get("i")
-    sala = payload.get("sala") or payload.get("s")
-    accion = payload.get("accion") or payload.get("a")
-
-    has_filtros = any([institucion, sala, accion, fecha_desde, fecha_hasta])
-    if texto:
-        if len(texto) < 3 and not has_filtros:
-            return {"error": "Debe proporcionar 'texto' (min 3 caracteres).", "nivel_consulta": "FielWeb"}
-        if len(texto) < 3 and has_filtros:
-            texto = ""
-    elif not has_filtros:
-        return {
-            "error": "Debe proporcionar al menos un filtro: texto (min 3), institucion, sala, accion o rango de fechas.",
-            "nivel_consulta": "FielWeb",
-        }
-
-    descargar_pdf = bool(payload.get("descargar_pdf") or False)
-    incluir_descargas = bool(payload.get("descargas") or False)
-    limite_resultados = payload.get("limite_resultados")
-    if limite_resultados is None:
-        limite_resultados = payload.get("max_resultados")
-    if limite_resultados is None:
-        limite_resultados = payload.get("limit")
-    try:
-        if limite_resultados is not None:
-            limite_resultados = int(limite_resultados)
-    except Exception:
-        limite_resultados = None
-
-    try:
-        sess = _session()
-        _login_and_token(sess)
-        return _buscar_jurisprudencia_ia(
-            sess,
-            texto,
-            opcion,
-            page,
-            orden,
-            tipo_fecha,
-            fecha_desde,
-            fecha_hasta,
-            institucion,
-            sala,
-            accion,
-            descargar_pdf,
-            incluir_descargas,
-            limite_resultados,
-        )
-    except requests.HTTPError as e:
-        return {
-            "error": f"HTTP {e.response.status_code} en FielWeb Jurisprudencia IA: {e.response.text}",
-            "nivel_consulta": "FielWeb",
-        }
-    except Exception as e:
-        return {"error": f"Error FielWeb Jurisprudencia IA: {e}", "nivel_consulta": "FielWeb"}
