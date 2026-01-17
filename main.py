@@ -37,7 +37,6 @@ except Exception as e:
 try:
     from providers.fielweb_connector import (
         consultar_fielweb,
-        consultar_fielweb_jurisprudencia_ia,
         descargar_norma_archivo,
     )
     from providers.judicial_connectors import (
@@ -56,7 +55,6 @@ try:
     print("Conectores cargados correctamente.")
 except ModuleNotFoundError as e:
     consultar_fielweb = None
-    consultar_fielweb_jurisprudencia_ia = None
     descargar_norma_archivo = None
     consultar_jurisprudencia = None
     consultar_corte_nacional = None
@@ -100,26 +98,6 @@ class ConsultarFielwebRequest(BaseModel):
         extra = "allow"
         allow_population_by_field_name = True
 
-
-class ConsultarFielwebRepoIARequest(BaseModel):
-    texto: Optional[str] = Field(
-        None,
-        description=(
-            "Termino de busqueda en Repositorio Jurisprudencia + IA (opcional; "
-            "si no se envia, debe usarse al menos un filtro)."
-        ),
-    )
-    page: Optional[int] = Field(1, description="Pagina de resultados.")
-    reformas: Optional[str] = Field("2", description="Pestana de reformas (\"2\" = Todo).")
-    limite_resultados: Optional[int] = Field(
-        3, description="Cantidad maxima de resultados a devolver."
-    )
-    max_resultados: Optional[int] = Field(None, description="Alias de limite_resultados.")
-    limit: Optional[int] = Field(None, description="Alias de limite_resultados.")
-
-    class Config:
-        extra = "allow"
-        allow_population_by_field_name = True
 
 # ============================================
 # Helpers para enlaces de descarga firmados (FielWeb)
@@ -182,46 +160,6 @@ async def consult_fielweb_endpoint(payload: ConsultarFielwebRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error FielWeb: {str(e)}")
 
-
-@app.post("/consult_fielweb_jurisprudencia_ia")
-async def consult_fielweb_jurisprudencia_ia_endpoint(payload: ConsultarFielwebRepoIARequest):
-    if not consultar_fielweb_jurisprudencia_ia:
-        raise HTTPException(status_code=500, detail="Conector FielWeb no disponible.")
-    try:
-        try:
-            payload_dict = payload.model_dump(exclude_none=True)
-        except AttributeError:
-            payload_dict = payload.dict(exclude_none=True)
-
-        texto = (payload_dict.get("texto") or "").strip()
-        if len(texto) < 3:
-            raise HTTPException(
-                status_code=400,
-                detail="Debe proporcionar un texto de al menos 3 caracteres para Jurisprudencia + IA.",
-            )
-
-        limite = (
-            payload_dict.get("limite_resultados")
-            or payload_dict.get("max_resultados")
-            or payload_dict.get("limit")
-            or 3
-        )
-        try:
-            limite = int(limite)
-        except Exception:
-            limite = 3
-        if limite < 1:
-            limite = 1
-        if limite > 20:
-            limite = 20
-        payload_dict["limite_resultados"] = limite
-
-        return await run_in_threadpool(consultar_fielweb_jurisprudencia_ia, payload_dict)
-    except HTTPException:
-        raise
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error FielWeb Jurisprudencia IA: {str(e)}")
 
 
 @app.post("/fielweb/download_link")
