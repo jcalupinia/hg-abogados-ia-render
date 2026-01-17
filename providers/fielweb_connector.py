@@ -442,7 +442,20 @@ def _buscar_jurisprudencia_ia(
     data = _post_json(sess, "/app/tpl/jurisprudencias/modulo.aspx/Buscar", payload)
     data_block = _as_dict(data.get("d"))
     data_inner = _as_dict(data_block.get("Data"))
-    resultados = data_inner.get("resultados") or []
+    resultados = data_inner.get("resultados")
+    if not resultados:
+        for key in ("Resultados", "resultado", "Resultado", "items", "Items", "results", "Results"):
+            resultados = data_inner.get(key)
+            if resultados:
+                break
+    if not resultados:
+        nested = _as_dict(data_inner.get("Data"))
+        for key in ("resultados", "Resultados", "resultado", "Resultado", "items", "Items"):
+            resultados = nested.get(key)
+            if resultados:
+                break
+    if resultados is None:
+        resultados = []
     if isinstance(resultados, dict):
         resultados = [resultados]
     if not isinstance(resultados, list):
