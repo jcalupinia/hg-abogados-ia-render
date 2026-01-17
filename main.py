@@ -100,7 +100,13 @@ class ConsultarFielwebRequest(BaseModel):
 
 
 class ConsultarFielwebRepoIARequest(BaseModel):
-    texto: str = Field(..., description="Termino de busqueda en Repositorio Jurisprudencia + IA.")
+    texto: Optional[str] = Field(
+        None,
+        description=(
+            "Termino de busqueda en Repositorio Jurisprudencia + IA (opcional; "
+            "si no se envia, debe usarse al menos un filtro)."
+        ),
+    )
     page: Optional[int] = Field(1, description="Pagina de resultados.")
     reformas: Optional[str] = Field("2", description="Pestana de reformas (\"2\" = Todo).")
     limite_resultados: Optional[int] = Field(
