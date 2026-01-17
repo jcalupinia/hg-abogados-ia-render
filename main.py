@@ -82,7 +82,9 @@ class ConsultarFielwebRequest(BaseModel):
     texto: str = Field(..., description="Termino de busqueda.")
     seccion: Optional[int] = Field(1, description="Seccion (1 vigente, 2 historica, etc).")
     reformas: Optional[str] = Field("2", description="Pestana de reformas (\"2\" = Todo).")
-    page: Optional[int] = Field(1, description="Pagina de resultados.")
+    page: Optional[int] = Field(
+        -1, description="Pagina de resultados (usar -1 como pagina inicial)."
+    )
     limite_resultados: Optional[int] = Field(None, description="Limita la cantidad de resultados devueltos.")
     descargar_pdf: Optional[bool] = Field(False, description="Si es true intenta adjuntar pdf_base64 de RO.")
     descargas: Optional[bool] = Field(False, description="Incluye rutas y links de descarga por formato.")
