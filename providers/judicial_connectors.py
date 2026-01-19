@@ -278,6 +278,60 @@ def _pick(d: Dict[str, Any], keys: List[str]) -> Any:
             return d[k]
     return ""
 
+
+def _normalize_incidente_list(raw: Any, informacion: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    if raw is None:
+        return []
+    incidencias: List[Dict[str, Any]] = []
+    if isinstance(raw, dict):
+        for key in ("incidencias", "incidenteJudicatura", "incidentes", "resultado", "data", "content", "items"):
+            value = raw.get(key)
+            if isinstance(value, list):
+                incidencias = [it for it in value if isinstance(it, dict)]
+                break
+        else:
+            incidencias = [raw]
+    elif isinstance(raw, list):
+        incidencias = [it for it in raw if isinstance(it, dict)]
+    else:
+        return []
+
+    informacion = informacion or {}
+    normalized: List[Dict[str, Any]] = []
+    for inc in incidencias:
+        norm = dict(inc)
+        id_mov = _pick(
+            inc,
+            [
+                "idMovimientoJuicioIncidente",
+                "idMovimientoJuicio",
+                "idMovimiento",
+                "id_movimiento",
+                "idTablaReferencia",
+                "tablaReferencia",
+            ],
+        )
+        id_inc = _pick(inc, ["idIncidenteJudicatura", "idIncidente", "id_incidente"])
+        id_jud = _pick(inc, ["idJudicatura", "id_judicatura"]) or informacion.get("idJudicatura")
+        incidente_num = _pick(inc, ["incidente", "numeroIncidente"])
+        nombre_jud = (
+            _pick(inc, ["nombreJudicatura", "nombre_judicatura", "judicatura"])
+            or informacion.get("nombreJudicatura")
+        )
+
+        if id_mov:
+            norm["idMovimientoJuicioIncidente"] = id_mov
+        if id_inc:
+            norm["idIncidenteJudicatura"] = id_inc
+        if id_jud:
+            norm["idJudicatura"] = id_jud
+        if incidente_num:
+            norm["incidente"] = incidente_num
+        if nombre_jud:
+            norm["nombreJudicatura"] = nombre_jud
+        normalized.append(norm)
+    return normalized
+
 async def _click_recaptcha_checkbox(page) -> bool:
     """
     Intenta clicar el checkbox de reCAPTCHA si está presente (no resuelve retos avanzados).
@@ -1522,20 +1576,14 @@ def exportar_pdf_satje(payload: Dict[str, Any]) -> Dict[str, Any]:
     else:
         try:
             inc_raw = _get_incidente_judicatura(str(id_juicio))
-            if isinstance(inc_raw, dict):
-                incidencias = [inc_raw]
-            elif isinstance(inc_raw, list):
-                incidencias = inc_raw
-            else:
-                incidencias = []
+            incidencias = _normalize_incidente_list(inc_raw, informacion)
         except Exception as e:
             errores.append(f"No se pudieron obtener incidencias: {e}")
 
     if incidencias:
-        inc = next(
-            (it for it in incidencias if it.get("idMovimientoJuicioIncidente")),
-            incidencias[0],
-        )
+        incidencias = _normalize_incidente_list(incidencias, informacion)
+        required = ("idIncidenteJudicatura", "idJudicatura", "idMovimientoJuicioIncidente")
+        inc = next((it for it in incidencias if all(it.get(k) for k in required)), incidencias[0])
         act_payload = {
             "aplicativo": "web",
             "idIncidenteJudicatura": inc.get("idIncidenteJudicatura"),
@@ -1546,7 +1594,6 @@ def exportar_pdf_satje(payload: Dict[str, Any]) -> Dict[str, Any]:
             "nombreJudicatura": inc.get("nombreJudicatura"),
         }
         try:
-            required = ("idIncidenteJudicatura", "idJudicatura", "idMovimientoJuicioIncidente")
             missing = [key for key in required if not act_payload.get(key)]
             if missing:
                 errores.append(f"Faltan campos para actuaciones: {', '.join(missing)}")
