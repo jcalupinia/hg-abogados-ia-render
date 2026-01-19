@@ -215,7 +215,7 @@ def _build_satje_pdf(
             f"Incidente: {inc.get('incidente') or ''}",
             f"Id incidente judicatura: {inc.get('idIncidenteJudicatura') or ''}",
             f"Id movimiento incidente: {inc.get('idMovimientoJuicioIncidente') or ''}",
-            f"Fecha incidente: {_norm_fecha(inc.get('fechaIngreso'))}",
+            f"Fecha incidente: {_norm_fecha(_pick(inc, ['fechaIngreso', 'fechaCrea', 'fechaCreacion', 'fecha']))}",
         ]
         _pdf_section(pdf, "Incidente", incidente_lineas)
 
@@ -296,6 +296,27 @@ def _normalize_incidente_list(raw: Any, informacion: Optional[Dict[str, Any]] = 
     else:
         return []
 
+    # Algunos endpoints devuelven una lista de objetos que contienen "lstIncidenteJudicatura".
+    # Aplanamos esa estructura para extraer los IDs necesarios.
+    expanded: List[Dict[str, Any]] = []
+    for inc in incidencias:
+        nested = inc.get("lstIncidenteJudicatura") or inc.get("listaIncidenteJudicatura")
+        if isinstance(nested, list) and nested:
+            for child in nested:
+                if not isinstance(child, dict):
+                    continue
+                merged = dict(child)
+                if inc.get("idJudicatura"):
+                    merged.setdefault("idJudicatura", inc.get("idJudicatura"))
+                if inc.get("idJudicaturaDestino"):
+                    merged.setdefault("idJudicatura", inc.get("idJudicaturaDestino"))
+                if inc.get("nombreJudicatura"):
+                    merged.setdefault("nombreJudicatura", inc.get("nombreJudicatura"))
+                expanded.append(merged)
+        else:
+            expanded.append(inc)
+
+    incidencias = expanded
     informacion = informacion or {}
     normalized: List[Dict[str, Any]] = []
     for inc in incidencias:
@@ -312,10 +333,13 @@ def _normalize_incidente_list(raw: Any, informacion: Optional[Dict[str, Any]] = 
             ],
         )
         id_inc = _pick(inc, ["idIncidenteJudicatura", "idIncidente", "id_incidente"])
-        id_jud = _pick(inc, ["idJudicatura", "id_judicatura"]) or informacion.get("idJudicatura")
+        id_jud = _pick(
+            inc,
+            ["idJudicatura", "idJudicaturaDestino", "id_judicatura"],
+        ) or informacion.get("idJudicatura")
         incidente_num = _pick(inc, ["incidente", "numeroIncidente"])
         nombre_jud = (
-            _pick(inc, ["nombreJudicatura", "nombre_judicatura", "judicatura"])
+            _pick(inc, ["nombreJudicatura", "nombreJudicaturaDestino", "nombre_judicatura", "judicatura"])
             or informacion.get("nombreJudicatura")
         )
 
