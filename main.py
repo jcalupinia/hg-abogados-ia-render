@@ -9,6 +9,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 import os, traceback, asyncio
+from io import BytesIO
 import requests
 from typing import Optional, Dict, Any, List
 import base64
@@ -18,6 +19,7 @@ import hashlib
 import time
 import uvloop
 import nest_asyncio
+from pypdf import PdfReader
 
 # ============================================
 # Compatibilidad con entorno Render (modo sandbox)
@@ -99,6 +101,27 @@ class ConsultarFielwebRequest(BaseModel):
         allow_population_by_field_name = True
 
 
+class DocumentAnalyzeRequest(BaseModel):
+    """
+    Solicita la lectura y extraccion de texto de un PDF.
+    Se puede enviar un download_url directo o, en el caso de FielWeb,
+    un norma_id + formato/concordancias para descargarlo desde el backend.
+    """
+    download_url: Optional[str] = Field(None, description="URL directa del PDF a analizar.")
+    source: Optional[str] = Field(None, description="Fuente (fielweb, satje, juriscopio, etc).")
+    norma_id: Optional[int] = Field(None, description="norma_id de FielWeb (si aplica).")
+    formato: Optional[str] = Field("pdf", description="Formato de descarga (pdf/word/html).")
+    concordancias: Optional[bool] = Field(False, description="Descargar con concordancias (FielWeb).")
+    query: Optional[str] = Field(None, description="Si se proporciona, devuelve extractos relevantes.")
+    max_snippets: Optional[int] = Field(3, description="Numero maximo de extractos si se usa query.")
+    max_chars: Optional[int] = Field(None, description="Limite de caracteres del texto devuelto.")
+    include_full_text: Optional[bool] = Field(True, description="Si true, devuelve el texto completo (o truncado).")
+
+    class Config:
+        extra = "allow"
+        allow_population_by_field_name = True
+
+
 # ============================================
 # Helpers para enlaces de descarga firmados (FielWeb)
 # ============================================
@@ -131,6 +154,43 @@ def _verify_download_token(token: str, secret: str) -> Dict[str, Any]:
     if exp and time.time() > float(exp):
         raise HTTPException(status_code=401, detail="Token de descarga expirado.")
     return payload
+
+
+def _extract_pdf_text(content: bytes) -> Dict[str, Any]:
+    reader = PdfReader(BytesIO(content))
+    pages_text: List[str] = []
+    for page in reader.pages:
+        try:
+            pages_text.append(page.extract_text() or "")
+        except Exception:
+            pages_text.append("")
+    full_text = "\n".join(pages_text).strip()
+    return {
+        "text": full_text,
+        "pages": len(reader.pages),
+        "empty_pages": sum(1 for t in pages_text if not t.strip()),
+    }
+
+
+def _build_snippets(text: str, query: str, max_snippets: int = 3, window: int = 200) -> List[str]:
+    if not text or not query:
+        return []
+    q = query.lower().strip()
+    if not q:
+        return []
+    lower = text.lower()
+    snippets: List[str] = []
+    start = 0
+    while len(snippets) < max_snippets:
+        idx = lower.find(q, start)
+        if idx == -1:
+            break
+        left = max(0, idx - window)
+        right = min(len(text), idx + len(q) + window)
+        snippet = text[left:right].strip()
+        snippets.append(snippet)
+        start = idx + len(q)
+    return snippets
 
 # ============================================
 # Endpoints basicos
@@ -238,6 +298,94 @@ async def fielweb_download(token: str):
     filename = result.get("filename") or f"norma_{norma_id}.{formato}"
     headers = {"Content-Disposition": f'inline; filename="{filename}"'}
     return Response(content=result["content_bytes"], media_type=content_type, headers=headers)
+
+
+@app.post("/document/analyze")
+async def document_analyze(payload: DocumentAnalyzeRequest):
+    """
+    Descarga un PDF y extrae texto completo para analisis.
+    """
+    req = payload.dict(exclude_none=True)
+    download_url = req.get("download_url")
+    source = (req.get("source") or "").lower()
+    norma_id = req.get("norma_id")
+    formato = (req.get("formato") or "pdf").lower()
+    concordancias = bool(req.get("concordancias"))
+    include_full_text = bool(req.get("include_full_text", True))
+    max_snippets = int(req.get("max_snippets") or 3)
+    query = req.get("query")
+
+    content: Optional[bytes] = None
+    content_type = "application/pdf"
+    filename = "documento.pdf"
+
+    # Priorizar FielWeb si se provee norma_id
+    if norma_id and descargar_norma_archivo:
+        result = await run_in_threadpool(descargar_norma_archivo, int(norma_id), formato, concordancias)
+        if not result:
+            raise HTTPException(status_code=404, detail="No se pudo descargar la norma.")
+        if result.get("error"):
+            raise HTTPException(status_code=500, detail=result.get("error"))
+        content = result.get("content_bytes")
+        content_type = result.get("content_type") or content_type
+        filename = result.get("filename") or filename
+    elif download_url:
+        if not (download_url.startswith("http://") or download_url.startswith("https://")):
+            raise HTTPException(status_code=400, detail="download_url debe ser http(s).")
+        try:
+            max_bytes = int(os.getenv("DOCUMENT_MAX_BYTES", "25000000"))
+        except Exception:
+            max_bytes = 25000000
+        try:
+            resp = requests.get(download_url, timeout=30)
+            resp.raise_for_status()
+            if len(resp.content) > max_bytes:
+                raise HTTPException(status_code=413, detail="Documento demasiado grande para procesar.")
+            content = resp.content
+            content_type = resp.headers.get("Content-Type") or content_type
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"No se pudo descargar el documento: {e}")
+    else:
+        raise HTTPException(status_code=400, detail="Debe enviar download_url o norma_id.")
+
+    if not content:
+        raise HTTPException(status_code=500, detail="Documento vacio o no descargado.")
+
+    try:
+        extract = await run_in_threadpool(_extract_pdf_text, content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"No se pudo extraer texto del PDF: {e}")
+
+    full_text = extract.get("text") or ""
+    try:
+        max_chars = int(req.get("max_chars")) if req.get("max_chars") is not None else None
+    except Exception:
+        max_chars = None
+    if max_chars is None:
+        try:
+            max_chars = int(os.getenv("DOCUMENT_TEXT_MAX_CHARS", "200000"))
+        except Exception:
+            max_chars = 200000
+
+    truncated = False
+    if include_full_text and max_chars and len(full_text) > max_chars:
+        full_text = full_text[:max_chars]
+        truncated = True
+
+    snippets = _build_snippets(full_text, query, max_snippets=max_snippets) if query else []
+
+    return {
+        "source": source or None,
+        "filename": filename,
+        "content_type": content_type,
+        "pages": extract.get("pages"),
+        "empty_pages": extract.get("empty_pages"),
+        "truncated": truncated,
+        "snippets": snippets,
+        "text": full_text if include_full_text else None,
+    }
 
 # ============================================
 # Exportar PDF SATJE (procesos judiciales)
