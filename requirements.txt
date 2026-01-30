@@ -16,6 +16,8 @@ pydantic==2.9.2
 typing-extensions==4.12.2
 Pillow==11.0.0
 pytesseract==0.3.13
+fpdf2==2.7.9
+pypdf==5.1.0
 
 # ---- EXTRA TOOLS (LOGGING / SYSTEM / DEBUGGING) ----
 tenacity==8.4.2
@@ -30,5 +32,3 @@ charset-normalizer==3.4.0
 
 # ---- EVENT LOOP FIX ----
 nest_asyncio==1.6.0
-fpdf2==2.7.9
-
