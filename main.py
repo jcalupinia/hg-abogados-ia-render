@@ -89,8 +89,10 @@ class ConsultarFielwebRequest(BaseModel):
     descargar_pdf: Optional[bool] = Field(False, description="Si es true intenta adjuntar pdf_base64 de RO.")
     descargas: Optional[bool] = Field(False, description="Incluye rutas y links de descarga por formato.")
     norma_id: Optional[int] = Field(None, description="Solicita el detalle puntual de una norma.")
-    parte_d: Optional[int] = Field(None, description="Indice inicial del bloque de articulos cuando se consulta norma_id.")
-    parte_h: Optional[int] = Field(None, description="Indice final del bloque de articulos cuando se consulta norma_id.")
+    articulo: Optional[str] = Field(None, description="Numero de articulo a recuperar (ej. '169'). Junto a norma_id devuelve su texto en norma_parte.")
+    articulado: Optional[bool] = Field(False, description="Si es true, junto a norma_id devuelve el indice completo del articulado en norma_articulado.")
+    parte_d: Optional[int] = Field(None, description="Avanzado: offset inicial de bloque para traerParteNorma (NO es numero de articulo; usar 'articulo').")
+    parte_h: Optional[int] = Field(None, description="Avanzado: offset final de bloque para traerParteNorma (NO es numero de articulo; usar 'articulo').")
     # Alias utiles para compatibilidad con el conector
     consulta: Optional[str] = Field(None, description="Alias de texto.")
     max_resultados: Optional[int] = Field(None, description="Alias de limite_resultados.")

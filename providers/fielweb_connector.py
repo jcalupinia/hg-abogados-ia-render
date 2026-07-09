@@ -15,7 +15,9 @@ endpoint para usos posteriores.
 """
 
 import os
+import re
 import base64
+import html as html_lib
 import requests
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin, parse_qs
@@ -26,8 +28,11 @@ FIELWEB_USERNAME = os.getenv("FIELWEB_USERNAME", "").strip()
 FIELWEB_PASSWORD = os.getenv("FIELWEB_PASSWORD", "").strip()
 
 DEFAULT_REFORMAS = "2"  # pestaña "Todo" en el front
-DEFAULT_SECCION = 1     # s=1 observado en búsquedas
+DEFAULT_SECCION = 1     # s=1 = normativa VIGENTE (2 = histórica / otro año)
 DEFAULT_PAGE = 1
+# Límite por defecto de resultados cuando el llamador no especifica uno.
+# Evita devolver ~20 normas por página y prioriza precisión. Configurable por env.
+DEFAULT_LIMITE = int(os.getenv("FIELWEB_DEFAULT_LIMITE", "5"))
 
 
 def _session() -> requests.Session:
@@ -422,16 +427,123 @@ def _traer_parte_norma(
 ) -> Optional[List[Dict[str, Any]]]:
     if d_value is None or h_value is None:
         return None
-    try:
-        data = _post_json(
-            sess,
-            "/app/tpl/norma/norma.aspx/traerParteNorma",
-            {"id": norma_id, "d": d_value, "h": h_value},
-        )
-        data_block = _as_dict(data.get("d"))
-        return data_block.get("Data")
-    except Exception:
+    data = _post_json(
+        sess,
+        "/app/tpl/norma/norma.aspx/traerParteNorma",
+        {"id": norma_id, "d": d_value, "h": h_value},
+    )
+    data_block = _as_dict(data.get("d"))
+    return data_block.get("Data")
+
+
+# ---------------------------------------------------------------------------
+# Articulado: traer y localizar artículos por número.
+#
+# NOTA: en FielWeb `traerParteNorma` recibe `d`/`h` que son OFFSETS de posición
+# de los bloques de texto del articulado (no números de artículo). Por eso pedir
+# `d=169` NO trae el "Art. 169". El articulado completo se obtiene con d=0 y un
+# `h` grande, y cada artículo empieza en un bloque cuyo texto plano arranca con
+# "Art. N.-". Aquí traemos el articulado y localizamos el artículo por ese patrón.
+# ---------------------------------------------------------------------------
+
+# Cantidad máxima de bloques a solicitar (el Código del Trabajo tiene ~1958).
+ARTICULADO_H_MAX = int(os.getenv("FIELWEB_ARTICULADO_H_MAX", "20000"))
+
+# Inicio de artículo: "Art. 169.-", "Art 169.-", "Art. 169 .-", etc.
+_ART_INICIO_RE = re.compile(r"^\s*Art\.?\s*([0-9]+[A-Za-z\.\-]*)\s*\.-", re.IGNORECASE)
+
+
+def _strip_html(texto: Optional[str]) -> str:
+    """Convierte el HTML de un bloque de FielWeb a texto plano legible."""
+    if not texto:
+        return ""
+    t = re.sub(r"(?i)<br\s*/?>", "\n", texto)
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = html_lib.unescape(t)
+    t = re.sub(r"[ \t ]+", " ", t)
+    t = re.sub(r"\s*\n\s*", "\n", t)
+    return t.strip()
+
+
+def _norm_num_articulo(valor: Any) -> str:
+    """Normaliza un número de artículo para comparar ('169', 'Art. 169', '169-A')."""
+    return re.sub(r"[^0-9a-zA-Z]", "", str(valor or "")).lower()
+
+
+def _traer_articulado(sess: requests.Session, norma_id: int) -> List[Dict[str, Any]]:
+    """Devuelve la lista cruda de bloques (Texto/ArbolId/Id) del articulado completo."""
+    data = _post_json(
+        sess,
+        "/app/tpl/norma/norma.aspx/traerParteNorma",
+        {"id": norma_id, "d": 0, "h": ARTICULADO_H_MAX},
+    )
+    data_block = _as_dict(data.get("d"))
+    partes = data_block.get("Data")
+    return partes if isinstance(partes, list) else []
+
+
+def _buscar_articulo(bloques: List[Dict[str, Any]], numero: Any) -> Optional[Dict[str, Any]]:
+    """
+    Localiza un artículo por su número dentro de los bloques del articulado.
+    Agrupa desde el bloque que inicia con "Art. N.-" hasta el bloque anterior
+    al siguiente artículo. Devuelve dict con {articulo, texto, html, bloque_indice}.
+    """
+    objetivo = _norm_num_articulo(numero)
+    if not objetivo:
         return None
+
+    inicio = None
+    for idx, bloque in enumerate(bloques):
+        plano = _strip_html(bloque.get("Texto", ""))
+        m = _ART_INICIO_RE.match(plano)
+        if m and _norm_num_articulo(m.group(1)) == objetivo:
+            inicio = idx
+            break
+    if inicio is None:
+        return None
+
+    piezas_texto: List[str] = []
+    piezas_html: List[str] = []
+    for j in range(inicio, len(bloques)):
+        plano = _strip_html(bloques[j].get("Texto", ""))
+        if j > inicio and _ART_INICIO_RE.match(plano):
+            break  # empezó el siguiente artículo
+        if plano:
+            piezas_texto.append(plano)
+            piezas_html.append(bloques[j].get("Texto", ""))
+
+    return {
+        "articulo": str(numero),
+        "texto": "\n".join(piezas_texto).strip(),
+        "html": "".join(piezas_html),
+        "bloque_indice": inicio,
+    }
+
+
+def _listar_articulos(bloques: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Parsea el articulado completo a una lista de {articulo, titulo, texto}."""
+    articulos: List[Dict[str, Any]] = []
+    actual: Optional[Dict[str, Any]] = None
+    for bloque in bloques:
+        plano = _strip_html(bloque.get("Texto", ""))
+        if not plano:
+            continue
+        m = _ART_INICIO_RE.match(plano)
+        if m:
+            if actual:
+                actual["texto"] = "\n".join(actual["_piezas"]).strip()
+                actual.pop("_piezas", None)
+                articulos.append(actual)
+            resto = plano[m.end():].strip()
+            titulo = resto.split(".-", 1)[0].strip() if ".-" in resto else ""
+            actual = {"articulo": m.group(1), "titulo": titulo[:200], "_piezas": [plano]}
+        elif actual:
+            actual["_piezas"].append(plano)
+    if actual:
+        actual["texto"] = "\n".join(actual["_piezas"]).strip()
+        actual.pop("_piezas", None)
+        articulos.append(actual)
+    return articulos
 
 
 def consultar_fielweb(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -443,7 +555,12 @@ def consultar_fielweb(payload: Dict[str, Any]) -> Dict[str, Any]:
       - page / pag: página (opcional, por defecto 1)
       - descargar_pdf (bool, opcional): si True, intenta generar y devolver pdf_base64 por cada resultado con RO.
       - norma_id (opcional): si se envía, devolver detalle de norma (traerDetalleNorma)
-      - parte_d / parte_h (opcionales): si se envían junto a norma_id, traerParteNorma y devolver la lista de textos.
+      - articulo / art (opcional): número de artículo a recuperar (ej. "169"). Junto a norma_id
+        devuelve en `norma_parte` el texto del artículo localizado por su encabezado "Art. N.-".
+      - articulado / todo_articulado (bool, opcional): junto a norma_id devuelve en
+        `norma_articulado` el índice completo (número + título + texto por artículo).
+      - parte_d / parte_h (opcionales, avanzado): offsets crudos de bloque para traerParteNorma
+        (NO son números de artículo; para el texto de un artículo usar `articulo`).
       - descargas (bool, opcional): si True, devuelve rutas y URLs de descarga (pdf/word/html con/sin concordancias).
     """
     if not isinstance(payload, dict):
@@ -475,6 +592,9 @@ def consultar_fielweb(payload: Dict[str, Any]) -> Dict[str, Any]:
             limite_resultados = int(limite_resultados)
     except Exception:
         limite_resultados = None
+    # Si no se pidió un límite explícito, aplicar uno bajo para priorizar precisión.
+    if limite_resultados is None:
+        limite_resultados = DEFAULT_LIMITE
 
     try:
         sess = _session()
@@ -491,25 +611,60 @@ def consultar_fielweb(payload: Dict[str, Any]) -> Dict[str, Any]:
             limite_resultados,
         )
 
-        # Opcional: traer detalle y parte de norma si se solicita
+        # Opcional: traer detalle y articulado de una norma si se solicita
         norma_id = payload.get("norma_id") or payload.get("id_norma")
         if norma_id:
             try:
                 norma_id_int = int(norma_id)
-                detalle = _traer_detalle_norma(sess, norma_id_int)
-                parte_d = payload.get("parte_d")
-                parte_h = payload.get("parte_h")
-                parte = None
-                try:
-                    if parte_d is not None and parte_h is not None:
-                        parte = _traer_parte_norma(sess, norma_id_int, int(parte_d), int(parte_h))
-                except Exception:
-                    parte = None
-                base["norma_detalle"] = detalle
-                if parte is not None:
-                    base["norma_parte"] = parte
             except Exception:
-                base["norma_detalle"] = {"error": "No se pudo obtener detalle de norma"}
+                base["norma_detalle"] = {"error": f"norma_id inválido: {norma_id!r}"}
+                return base
+
+            try:
+                base["norma_detalle"] = _traer_detalle_norma(sess, norma_id_int)
+            except Exception as det_exc:
+                base["norma_detalle"] = {"error": f"No se pudo obtener detalle de norma: {det_exc}"}
+
+            articulo = payload.get("articulo") or payload.get("art")
+            quiere_articulado = bool(payload.get("articulado") or payload.get("todo_articulado"))
+            parte_d = payload.get("parte_d")
+            parte_h = payload.get("parte_h")
+
+            try:
+                if articulo is not None and str(articulo).strip():
+                    # Buscar un artículo puntual por su número (ej. "169").
+                    bloques = _traer_articulado(sess, norma_id_int)
+                    encontrado = _buscar_articulo(bloques, articulo)
+                    if encontrado:
+                        base["norma_parte"] = encontrado
+                    else:
+                        disponibles = [a.get("articulo") for a in _listar_articulos(bloques)]
+                        base["norma_parte"] = {
+                            "error": f"No se encontró el Art. {articulo} en la norma {norma_id_int}.",
+                            "articulos_detectados": len(disponibles),
+                            "ejemplos": disponibles[:10],
+                        }
+                elif quiere_articulado:
+                    # Índice del articulado (liviano: número + título). El texto
+                    # completo de un artículo se pide con el parámetro `articulo`.
+                    bloques = _traer_articulado(sess, norma_id_int)
+                    articulos = _listar_articulos(bloques)
+                    base["norma_articulado"] = {
+                        "total": len(articulos),
+                        "articulos": [
+                            {"articulo": a.get("articulo"), "titulo": a.get("titulo", "")}
+                            for a in articulos
+                        ],
+                    }
+                elif parte_d is not None and parte_h is not None:
+                    # Compatibilidad: consulta cruda por offsets d/h.
+                    base["norma_parte"] = _traer_parte_norma(
+                        sess, norma_id_int, int(parte_d), int(parte_h)
+                    )
+            except Exception as art_exc:
+                base["norma_parte"] = {
+                    "error": f"No se pudo obtener el articulado: {art_exc}"
+                }
         return base
     except requests.HTTPError as e:
         return {
